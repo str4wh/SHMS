@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "323744464504",
+    "project_id": "shms-7b88d",
+    "storage_bucket": "shms-7b88d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:323744464504:android:faa0d1779a30cfa4f4f78d",
+        "android_client_info": {
+          "package_name": "com.example.mysmhs"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBdjA1TbuCzmgp4T3OoqEpalMNOTqYdDcU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

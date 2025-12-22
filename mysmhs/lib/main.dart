@@ -1,6 +1,6 @@
-// ignore_for_file: unused_local_variable
+// ignore_for_file: unused_local_variable, unused_import
 
-import 'dart:async';// For StreamSubscription
+import 'dart:async'; // For StreamSubscription
 
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -8,6 +8,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+// Services (offline, caching, sync)
+import 'services/connectivity_service.dart';
+import 'services/local_cache_service.dart';
+import 'services/sync_manager.dart';
 
 import 'landingpage.dart';
 import 'authpage.dart';
@@ -17,7 +22,21 @@ import 'firebase_options.dart';
 // Entry point of the app, initializes Firebase and runs MyApp.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Firebase first (assumed configured already)
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // Initialize our services (connectivity, cache, sync)
+  await ConnectivityService.instance.initialize();
+  // Local cache does not require heavy init but is ready to use
+  await SyncManager.instance.init();
+
+  // Register an example handler for profile updates that writes to Firestore.
+  SyncManager.instance.registerHandler(
+    'update_profile',
+    firestoreUserProfileUpdateHandler,
+  );
+
   runApp(const MyApp());
 }
 
@@ -32,21 +51,28 @@ class MyApp extends StatefulWidget {
 /// State of MyApp managing navigation based on authentication state.
 class _MyAppState extends State<MyApp> {
   final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
-  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   StreamSubscription<User?>? _authSub;
 
   @override
   void initState() {
     super.initState();
-    // Listen to auth state changes centrally. This ensures navigation decisions
-    // are made in one place and are testable.
+
+    // Listen to auth changes centrally
     _authSub = FirebaseAuth.instance.authStateChanges().listen(
       _onAuthStateChanged,
     );
-    // Also handle initial state in case stream does not emit immediately.
+
+    // Also handle initial state after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final user = FirebaseAuth.instance.currentUser;
-      _onAuthStateChanged(user);
+      await _onAuthStateChanged(user);
+    });
+
+    // When connectivity becomes online, try to flush any queued actions
+    ConnectivityService.instance.onStatusChange.listen((online) {
+      if (online) {
+        SyncManager.instance.flushQueue();
+      }
     });
   }
 
@@ -56,43 +82,89 @@ class _MyAppState extends State<MyApp> {
     super.dispose();
   }
 
+  /// Centralized auth handler determines navigation and caching behavior.
   Future<void> _onAuthStateChanged(User? user) async {
-    // Centralized handler: route users to landing (/), auth (/auth), or dashboard (/dashboard)
     if (user == null) {
-      // Not signed in: show landing page
+      // Signed out: clear cache and queued actions, navigate to landing
+      await LocalCacheService.instance.clearCache();
+      await SyncManager.instance.clearQueue();
       _navKey.currentState?.pushNamedAndRemoveUntil('/', (r) => false);
       return;
     }
 
-    // Signed in: determine role then navigate to dashboard
-    String role = 'student';
-    try {
-      final conn = await Connectivity().checkConnectivity();
-      if (conn != ConnectivityResult.none) {
+    // Signed in: try to use cached session first (offline-first)
+    final cached = await LocalCacheService.instance.getUser();
+    final online = ConnectivityService.instance.isOnline.value;
+
+    if (cached != null) {
+      // Use cached data to allow immediate access while we optionally refresh
+      final role = cached['role'] ?? 'student';
+
+      // Navigate immediately for best user experience
+      _navKey.currentState?.pushNamedAndRemoveUntil(
+        '/dashboard',
+        (r) => false,
+        arguments: {'role': role},
+      );
+
+      // In the background, refresh from server if online and update cache
+      if (online) {
+        try {
+          final doc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .get();
+          final roleFromServer = (doc.data()?['role'] as String?) ?? role;
+          await LocalCacheService.instance.saveUser(
+            uid: user.uid,
+            email: user.email,
+            role: roleFromServer,
+          );
+          await LocalCacheService.instance.setLastSync(DateTime.now());
+        } catch (_) {
+          // ignore - we keep using cached values
+        }
+      }
+
+      return;
+    }
+
+    // No cached data
+    if (online) {
+      // Fetch profile from server, cache it and navigate
+      try {
         final doc = await FirebaseFirestore.instance
             .collection('users')
             .doc(user.uid)
             .get();
-        role = (doc.data()?['role'] as String?) ?? 'student';
-        // Cache role locally for offline routing
-        await _secureStorage.write(key: 'shms_role', value: role);
-      } else {
-        final cached = await _secureStorage.read(key: 'shms_role');
-        role = cached ?? 'student';
-      }
-    } catch (e) {
-      if (mounted) {
-        // On error, fallback to cached or default role
-        final cached = await _secureStorage.read(key: 'shms_role');
-        role = cached ?? 'student';
+        final role = (doc.data()?['role'] as String?) ?? 'student';
+        await LocalCacheService.instance.saveUser(
+          uid: user.uid,
+          email: user.email,
+          role: role,
+        );
+        await LocalCacheService.instance.setLastSync(DateTime.now());
+        _navKey.currentState?.pushNamedAndRemoveUntil(
+          '/dashboard',
+          (r) => false,
+          arguments: {'role': role},
+        );
+        return;
+      } catch (_) {
+        // if network fails during fetch, fall through to offline behavior
       }
     }
 
-    // Navigate to dashboard, remove previous routes
+    // Offline and no cached info: allow access with defaults so the user can still use the app
+    await LocalCacheService.instance.saveUser(
+      uid: user.uid,
+      email: user.email,
+      role: 'student',
+    );
     _navKey.currentState?.pushNamedAndRemoveUntil(
       '/dashboard',
       (r) => false,
-      arguments: {'role': role},
+      arguments: {'role': 'student'},
     );
   }
 

@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:mysmhs/add_edit_room_page.dart';
 
 // Services (offline, caching, sync)
 import 'services/connectivity_service.dart';
@@ -18,6 +19,7 @@ import 'landingpage.dart';
 import 'authpage.dart';
 import 'dashboardpage.dart';
 import 'firebase_options.dart';
+import 'admin_dashboard_page.dart';
 
 // Entry point of the app, initializes Firebase and runs MyApp.
 Future<void> main() async {
@@ -100,9 +102,10 @@ class _MyAppState extends State<MyApp> {
       // Use cached data to allow immediate access while we optionally refresh
       final role = cached['role'] ?? 'student';
 
-      // Navigate immediately for best user experience
+      // Navigate immediately for best user experience (admin -> /admin else -> /dashboard)
+      final route = role == 'admin' ? '/admin' : '/dashboard';
       _navKey.currentState?.pushNamedAndRemoveUntil(
-        '/dashboard',
+        route,
         (r) => false,
         arguments: {'role': role},
       );
@@ -144,8 +147,9 @@ class _MyAppState extends State<MyApp> {
           role: role,
         );
         await LocalCacheService.instance.setLastSync(DateTime.now());
+        final route = role == 'admin' ? '/admin' : '/dashboard';
         _navKey.currentState?.pushNamedAndRemoveUntil(
-          '/dashboard',
+          route,
           (r) => false,
           arguments: {'role': role},
         );
@@ -161,8 +165,9 @@ class _MyAppState extends State<MyApp> {
       email: user.email,
       role: 'student',
     );
+    final route = '/dashboard';
     _navKey.currentState?.pushNamedAndRemoveUntil(
-      '/dashboard',
+      route,
       (r) => false,
       arguments: {'role': 'student'},
     );
@@ -202,6 +207,60 @@ class _MyAppState extends State<MyApp> {
           final role = args != null ? (args['role'] as String?) : null;
           return DashboardPage();
         },
+        '/admin': (context) => const AdminGate(),
+        '/add-room': (context) => const AddEditRoomPage(),
+        '/bookings-approval': (context) => const BookingsApprovalPage(),
+        '/payments': (context) => const PaymentsPage(),
+        '/maintenance': (context) => const MaintenanceManagementPage(),
+      },
+    );
+  }
+}
+
+/// Guard widget that ensures the current user has `role == 'admin'` in Firestore.
+/// If not authenticated or not admin, the user is redirected to the login page.
+class AdminGate extends StatelessWidget {
+  const AdminGate({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      // Not authenticated -> redirect to login
+      Future.microtask(
+        () => Navigator.of(
+          context,
+        ).pushNamedAndRemoveUntil('/auth', (r) => false),
+      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      future: FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final data = snapshot.data?.data();
+        final role = data?['role'] as String?;
+
+        if (role == 'admin') {
+          return const AdminDashboardPage();
+        }
+
+        // Not admin -> redirect to login
+        Future.microtask(
+          () => Navigator.of(
+            context,
+          ).pushNamedAndRemoveUntil('/auth', (r) => false),
+        );
+        return const Scaffold(body: Center(child: Text('Redirecting...')));
       },
     );
   }

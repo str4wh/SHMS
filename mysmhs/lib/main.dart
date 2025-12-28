@@ -21,6 +21,14 @@ import 'dashboardpage.dart';
 import 'firebase_options.dart';
 import 'admin_dashboard_page.dart';
 
+// Student pages
+import 'student_dashboard_page.dart';
+import 'pages/pay_rent_page.dart';
+import 'pages/report_maintenance_page.dart';
+import 'pages/payment_history_page.dart';
+import 'room_details_page.dart';
+import 'admin_rooms_page.dart';
+
 // Entry point of the app, initializes Firebase and runs MyApp.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -102,8 +110,8 @@ class _MyAppState extends State<MyApp> {
       // Use cached data to allow immediate access while we optionally refresh
       final role = cached['role'] ?? 'student';
 
-      // Navigate immediately for best user experience (admin -> /admin else -> /dashboard)
-      final route = role == 'admin' ? '/admin' : '/dashboard';
+      // Navigate immediately for best user experience (admin -> /admin else -> /student-dashboard)
+      final route = role == 'admin' ? '/admin' : '/student-dashboard';
       _navKey.currentState?.pushNamedAndRemoveUntil(
         route,
         (r) => false,
@@ -147,7 +155,7 @@ class _MyAppState extends State<MyApp> {
           role: role,
         );
         await LocalCacheService.instance.setLastSync(DateTime.now());
-        final route = role == 'admin' ? '/admin' : '/dashboard';
+        final route = role == 'admin' ? '/admin' : '/student-dashboard';
         _navKey.currentState?.pushNamedAndRemoveUntil(
           route,
           (r) => false,
@@ -165,7 +173,7 @@ class _MyAppState extends State<MyApp> {
       email: user.email,
       role: 'student',
     );
-    final route = '/dashboard';
+    final route = '/student-dashboard';
     _navKey.currentState?.pushNamedAndRemoveUntil(
       route,
       (r) => false,
@@ -212,6 +220,21 @@ class _MyAppState extends State<MyApp> {
         '/bookings-approval': (context) => const BookingsApprovalPage(),
         '/payments': (context) => const PaymentsPage(),
         '/maintenance': (context) => const MaintenanceManagementPage(),
+
+        // Student specific pages
+        '/student-dashboard': (context) => const StudentDashboardPage(),
+        '/pay-rent': (context) => const PayRentPage(),
+        '/report-maintenance': (context) => const ReportMaintenancePage(),
+        '/payment-history': (context) => const PaymentHistoryPage(),
+        '/room-details': (context) {
+          final args =
+              ModalRoute.of(context)?.settings.arguments
+                  as Map<String, dynamic>?;
+          final roomId = args != null ? args['roomId'] as String? : null;
+          return RoomDetailsPage(roomId: roomId);
+        },
+        // Admin rooms management page
+        '/admin-rooms': (context) => const AdminRoomsPage(),
       },
     );
   }
@@ -265,3 +288,5 @@ class AdminGate extends StatelessWidget {
     );
   }
 }
+
+

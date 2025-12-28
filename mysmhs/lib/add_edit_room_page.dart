@@ -179,7 +179,8 @@ class _AddEditRoomPageState extends State<AddEditRoomPage> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(_isEdit ? 'Room updated' : 'Room added')),
           );
-          Navigator.of(context).pop(true);
+          // After admin adds/edits a room navigate to admin rooms management
+          Navigator.of(context).pushReplacementNamed('/admin-rooms');
           return;
         }
       }
@@ -189,7 +190,8 @@ class _AddEditRoomPageState extends State<AddEditRoomPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Saved locally - will sync when online')),
       );
-      Navigator.of(context).pop(true);
+      // After saving locally navigate to admin rooms management for admin users
+      Navigator.of(context).pushReplacementNamed('/admin-rooms');
     } catch (e) {
       ScaffoldMessenger.of(
         context,
@@ -460,32 +462,97 @@ class _AddEditRoomPageState extends State<AddEditRoomPage> {
                                         width: isWide
                                             ? (cstr.maxWidth / 2) - 12
                                             : double.infinity,
-                                        child: DropdownButtonFormField<String>(
-                                          value: _availability,
-                                          decoration: _inputDecoration(
-                                            'Availability',
+                                        child: Theme(
+                                          data: Theme.of(context).copyWith(
+                                            canvasColor: const Color(
+                                              0xFF1E3A8A,
+                                            ),
+                                            highlightColor: Colors.white
+                                                .withOpacity(0.08),
+                                            hoverColor: Colors.white
+                                                .withOpacity(0.1),
+                                            focusColor: Colors.white
+                                                .withOpacity(0.08),
+                                            splashFactory:
+                                                NoSplash.splashFactory,
                                           ),
-                                          items: const [
-                                            DropdownMenuItem(
-                                              value: 'available',
-                                              child: Text('Available'),
+                                          child: DropdownButtonFormField<String>(
+                                            value: _availability,
+                                            decoration: InputDecoration(
+                                              labelText: 'Availability',
+                                              labelStyle: TextStyle(
+                                                color: Colors.white70,
+                                              ),
+                                              filled: true,
+                                              fillColor: Colors.white
+                                                  .withOpacity(0.06),
+                                              border: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                borderSide: BorderSide.none,
+                                              ),
                                             ),
-                                            DropdownMenuItem(
-                                              value: 'occupied',
-                                              child: Text('Occupied'),
+                                            dropdownColor: const Color(
+                                              0xFF1E3A8A,
                                             ),
-                                            DropdownMenuItem(
-                                              value: 'maintenance',
-                                              child: Text('Maintenance'),
+                                            style: const TextStyle(
+                                              color: Colors.white,
                                             ),
-                                          ],
-                                          onChanged: (v) => setState(
-                                            () => _availability =
-                                                v ?? 'available',
-                                          ),
-                                          style: TextStyle(
-                                            color: Colors.white.withOpacity(
-                                              0.92,
+                                            iconEnabledColor: Colors.white,
+                                            items: const [
+                                              DropdownMenuItem(
+                                                value: 'available',
+                                                child: Text(
+                                                  'Available',
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                  ),
+                                                ),
+                                              ),
+                                              DropdownMenuItem(
+                                                value: 'occupied',
+                                                child: Text(
+                                                  'Occupied',
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                  ),
+                                                ),
+                                              ),
+                                              DropdownMenuItem(
+                                                value: 'maintenance',
+                                                child: Text(
+                                                  'Maintenance',
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                            // Ensure the selected display also uses white text
+                                            selectedItemBuilder: (context) =>
+                                                const [
+                                                  Text(
+                                                    'Available',
+                                                    style: TextStyle(
+                                                      color: Colors.white,
+                                                    ),
+                                                  ),
+                                                  Text(
+                                                    'Occupied',
+                                                    style: TextStyle(
+                                                      color: Colors.white,
+                                                    ),
+                                                  ),
+                                                  Text(
+                                                    'Maintenance',
+                                                    style: TextStyle(
+                                                      color: Colors.white,
+                                                    ),
+                                                  ),
+                                                ],
+                                            onChanged: (v) => setState(
+                                              () => _availability =
+                                                  v ?? 'available',
                                             ),
                                           ),
                                         ),

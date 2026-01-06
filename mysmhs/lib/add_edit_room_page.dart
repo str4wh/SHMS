@@ -1,11 +1,11 @@
-// ignore_for_file: unused_import, unused_local_variable
+// ignore_for_file: unused_import, unused_local_variable, use_build_context_synchronously
 
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
@@ -161,6 +161,7 @@ class _AddEditRoomPageState extends State<AddEditRoomPage> {
       'isOccupied': _availability == 'occupied',
       'description': _descriptionCtl.text.trim(),
       'availability': _availability,
+      'images': <String>[],
     };
 
     final combinedImages = <dynamic>[];
@@ -193,14 +194,32 @@ class _AddEditRoomPageState extends State<AddEditRoomPage> {
       // After saving locally navigate to admin rooms management for admin users
       Navigator.of(context).pushReplacementNamed('/admin-rooms');
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      if (kDebugMode) print('❌ Submit error: $e');
+      _showError('Failed to save room: ${e.toString()}');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
+  // Show error dialog
+  void _showError(String message) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Upload Error'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+// Build image picker grid
   Widget _buildImagePicker(BuildContext context, double width) {
     final isWide = width > 720;
     final cross = isWide ? 3 : (width > 420 ? 2 : 1);
@@ -313,6 +332,7 @@ class _AddEditRoomPageState extends State<AddEditRoomPage> {
               );
             }
 
+            // Add image button
             return InkWell(
               onTap: _pickImage,
               child: Container(
@@ -338,6 +358,7 @@ class _AddEditRoomPageState extends State<AddEditRoomPage> {
     );
   }
 
+  /// Input decoration helper
   InputDecoration _inputDecoration(String label) => InputDecoration(
     labelText: label,
     labelStyle: TextStyle(color: Colors.white.withOpacity(0.9)),
@@ -378,6 +399,8 @@ class _AddEditRoomPageState extends State<AddEditRoomPage> {
           ),
         ],
       ),
+      
+      /// Body with gradient background and form
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
@@ -447,13 +470,15 @@ class _AddEditRoomPageState extends State<AddEditRoomPage> {
                                             ),
                                           ),
                                           validator: (v) {
-                                            if (v == null || v.trim().isEmpty)
+                                            if (v == null || v.trim().isEmpty) {
                                               return 'Enter price';
+                                            }
                                             final parsed = double.tryParse(
                                               v.trim(),
                                             );
-                                            if (parsed == null || parsed <= 0)
+                                            if (parsed == null || parsed <= 0) {
                                               return 'Enter valid positive number';
+                                            }
                                             return null;
                                           },
                                         ),

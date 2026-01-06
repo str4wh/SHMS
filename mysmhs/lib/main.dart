@@ -14,6 +14,7 @@ import 'package:mysmhs/add_edit_room_page.dart';
 import 'services/connectivity_service.dart';
 import 'services/local_cache_service.dart';
 import 'services/sync_manager.dart';
+import 'services/mpesa_service.dart';
 
 import 'landingpage.dart';
 import 'authpage.dart';
@@ -23,9 +24,9 @@ import 'admin_dashboard_page.dart';
 
 // Student pages
 import 'student_dashboard_page.dart';
-import 'pages/pay_rent_page.dart';
-import 'pages/report_maintenance_page.dart';
-import 'pages/payment_history_page.dart';
+import 'pay_rent_page.dart';
+import 'report_maintenance_page.dart';
+import 'payment_history_page.dart';
 import 'room_details_page.dart';
 import 'admin_rooms_page.dart';
 
@@ -46,6 +47,9 @@ Future<void> main() async {
     'update_profile',
     firestoreUserProfileUpdateHandler,
   );
+
+  // Register M-Pesa payment handler for queued payments
+  SyncManager.instance.registerHandler('mpesa_payment', mpesaPaymentHandler);
 
   runApp(const MyApp());
 }
@@ -288,5 +292,3 @@ class AdminGate extends StatelessWidget {
     );
   }
 }
-
-

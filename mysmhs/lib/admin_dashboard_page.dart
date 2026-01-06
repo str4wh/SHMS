@@ -49,6 +49,167 @@ class AdminDashboardPage extends StatelessWidget {
           ),
         ],
       ),
+      drawer: Drawer(
+        child: Container(
+          decoration: const BoxDecoration(gradient: _gradient),
+          child: ListView(
+            padding: EdgeInsets.zero,
+            children: [
+              DrawerHeader(
+                decoration: const BoxDecoration(color: Colors.transparent),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.12),
+                        shape: BoxShape.circle,
+                      ),
+                      padding: const EdgeInsets.all(8),
+                      child: const Icon(
+                        Icons.admin_panel_settings,
+                        color: Colors.white,
+                        size: 32,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const Text(
+                      'Admin Panel',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Dashboard (current page)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                child: Card(
+                  color: Colors.white.withOpacity(0.08),
+                  elevation: 0,
+                  child: ListTile(
+                    leading: const Icon(Icons.dashboard, color: Colors.white),
+                    title: const Text(
+                      'Dashboard',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                    selected:
+                        ModalRoute.of(context)?.settings.name ==
+                        '/admin-dashboard',
+                    selectedTileColor: Colors.white.withOpacity(0.12),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      if (ModalRoute.of(context)?.settings.name !=
+                          '/admin-dashboard') {
+                        Navigator.pushReplacementNamed(
+                          context,
+                          '/admin-dashboard',
+                        );
+                      }
+                    },
+                  ),
+                ),
+              ),
+
+              // Manage Rooms
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                child: Card(
+                  color: Colors.white.withOpacity(0.08),
+                  elevation: 0,
+                  child: ListTile(
+                    leading: const Icon(
+                      Icons.meeting_room,
+                      color: Colors.white,
+                    ),
+                    title: const Text(
+                      'Manage Rooms',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                    selected:
+                        ModalRoute.of(context)?.settings.name == '/admin-rooms',
+                    selectedTileColor: Colors.white.withOpacity(0.12),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      if (ModalRoute.of(context)?.settings.name !=
+                          '/admin-rooms') {
+                        Navigator.pushReplacementNamed(context, '/admin-rooms');
+                      }
+                    },
+                  ),
+                ),
+              ),
+
+              // Payment Due
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                child: Card(
+                  color: Colors.white.withOpacity(0.08),
+                  elevation: 0,
+                  child: ListTile(
+                    leading: const Icon(Icons.payment, color: Colors.white),
+                    title: const Text(
+                      'Payment Due',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                    selected:
+                        ModalRoute.of(context)?.settings.name ==
+                        '/payment-history',
+                    selectedTileColor: Colors.white.withOpacity(0.12),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      if (ModalRoute.of(context)?.settings.name !=
+                          '/payment-history') {
+                        Navigator.pushReplacementNamed(
+                          context,
+                          '/payment-history',
+                        );
+                      }
+                    },
+                  ),
+                ),
+              ),
+
+              // Maintenance
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12.0,
+                  vertical: 8.0,
+                ),
+                child: Card(
+                  color: Colors.white.withOpacity(0.08),
+                  elevation: 0,
+                  child: ListTile(
+                    leading: const Icon(Icons.build, color: Colors.white),
+                    title: const Text(
+                      'Maintenance',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                    selected:
+                        ModalRoute.of(context)?.settings.name ==
+                        '/report-history',
+                    selectedTileColor: Colors.white.withOpacity(0.12),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      if (ModalRoute.of(context)?.settings.name !=
+                          '/report-history') {
+                        Navigator.pushReplacementNamed(
+                          context,
+                          '/report-history',
+                        );
+                      }
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
       body: SafeArea(
         child: Container(
           decoration: const BoxDecoration(gradient: _gradient),

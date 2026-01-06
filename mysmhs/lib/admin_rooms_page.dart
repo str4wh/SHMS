@@ -39,25 +39,39 @@ class _AdminRoomsPageState extends State<AdminRoomsPage> {
 
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          color: Colors.white,
+          onPressed: () {
+            // Navigate back to the admin dashboard route (guarded via /admin)
+            Navigator.pushReplacementNamed(context, '/admin');
+          },
+          tooltip: 'Back',
+        ),
         title: const Text(
           'Manage Rooms',
           style: TextStyle(color: Colors.white),
         ),
         backgroundColor: const Color(0xFF1E3A8A),
         elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           IconButton(
             onPressed: () => setState(() {}),
             icon: const Icon(Icons.refresh),
+            color: Colors.white,
             tooltip: 'Refresh',
           ),
           IconButton(
             onPressed: () {},
             icon: const Icon(Icons.filter_list),
+            color: Colors.white,
             tooltip: 'Filter',
           ),
         ],
       ),
+
+      /// Add Room button
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => Navigator.of(context).pushNamed('/add-room'),
         backgroundColor: Colors.white,
@@ -65,6 +79,8 @@ class _AdminRoomsPageState extends State<AdminRoomsPage> {
         icon: const Icon(Icons.add),
         label: const Text('Add Room'),
       ),
+
+      /// Body with gradient background and room list
       backgroundColor: Colors.transparent,
       body: SafeArea(
         child: Container(
@@ -94,10 +110,7 @@ class _AdminRoomsPageState extends State<AdminRoomsPage> {
                               ),
                               child: Row(
                                 children: [
-                                  const Icon(
-                                    Icons.search,
-                                    color: Colors.white70,
-                                  ),
+                                  const Icon(Icons.search, color: Colors.white),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: TextField(
@@ -190,16 +203,28 @@ class _AdminRoomsPageState extends State<AdminRoomsPage> {
                           final data = d.data();
                           final rn = (data['roomNumber']?.toString() ?? '')
                               .toLowerCase();
+
+                          final searchText = _searchCtl.text
+                              .trim()
+                              .toLowerCase();
                           final matchesSearch =
-                              _searchCtl.text.trim().isEmpty ||
-                              rn.contains(_searchCtl.text.trim().toLowerCase());
-                          final status =
+                              searchText.isEmpty || rn.contains(searchText);
+
+                          // Normalize availability/status to handle case variations and missing fields
+                          final statusRaw =
                               (data['availability'] as String?) ??
                               (data['isOccupied'] == true
                                   ? 'occupied'
                                   : 'available');
+                          final status = statusRaw
+                              .toString()
+                              .trim()
+                              .toLowerCase();
+
+                          final filter = _filter.trim().toLowerCase();
                           final matchesFilter =
-                              _filter == 'all' || status == _filter;
+                              filter == 'all' || status == filter;
+
                           return matchesSearch && matchesFilter;
                         }).toList();
 
@@ -355,6 +380,7 @@ class _AdminRoomsPageState extends State<AdminRoomsPage> {
     );
   }
 
+  /// Error widget
   Widget _buildError(String message, VoidCallback onRetry) => Card(
     color: Colors.white.withOpacity(0.06),
     child: Padding(
@@ -370,6 +396,7 @@ class _AdminRoomsPageState extends State<AdminRoomsPage> {
     ),
   );
 
+  /// Empty state widget
   Widget _buildEmpty(String message) => Card(
     color: Colors.white.withOpacity(0.06),
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -392,6 +419,7 @@ class _AdminRoomsPageState extends State<AdminRoomsPage> {
     ),
   );
 
+  /// Update room status helper
   Future<void> _updateStatus(String id, String status) async {
     try {
       await FirebaseFirestore.instance.collection('rooms').doc(id).update({
@@ -412,6 +440,7 @@ class _AdminRoomsPageState extends State<AdminRoomsPage> {
     }
   }
 
+  /// Delete room helper
   Future<void> _deleteRoom(
     String id,
     String roomNumber,
@@ -503,12 +532,14 @@ class __AdminRoomCardState extends State<_AdminRoomCard> {
     _pc = PageController();
   }
 
+  /// Next image
   @override
   void dispose() {
     _pc.dispose();
     super.dispose();
   }
 
+  /// Previous image
   void _prev() {
     final len = widget.images.length;
     if (len == 0) return;
@@ -520,6 +551,7 @@ class __AdminRoomCardState extends State<_AdminRoomCard> {
     );
   }
 
+  /// Next image
   void _next() {
     final len = widget.images.length;
     if (len == 0) return;
@@ -579,7 +611,7 @@ class __AdminRoomCardState extends State<_AdminRoomCard> {
                               child: Icon(
                                 Icons.bed,
                                 size: 42,
-                                color: Colors.white70,
+                                color: Colors.white,
                               ),
                             ),
                           );
@@ -600,7 +632,7 @@ class __AdminRoomCardState extends State<_AdminRoomCard> {
                           errorWidget: (context, url, err) => Center(
                             child: Icon(
                               Icons.broken_image,
-                              color: Colors.white70,
+                              color: Colors.white,
                             ),
                           ),
                         );
@@ -837,9 +869,19 @@ class _RoomDetailsDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Dialog(
+      backgroundColor: const Color(0xFF1E3A8A), // Solid background
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Container(
-        padding: const EdgeInsets.all(12),
-        color: Colors.transparent,
+        constraints: const BoxConstraints(maxWidth: 500),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF052A6E), Color(0xFF5BC0FF)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(12),
+        ),
         child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
           stream: FirebaseFirestore.instance
               .collection('rooms')
@@ -867,75 +909,176 @@ class _RoomDetailsDialog extends StatelessWidget {
                 ),
               );
             }
+
             final data = snap.data?.data() ?? {};
             final images =
                 (data['images'] as List?)?.cast<String>() ?? const [];
 
             return SingleChildScrollView(
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Close button
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Room Details',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close, color: Colors.white),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Image
                   if (images.isNotEmpty)
-                    SizedBox(
-                      height: 180,
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
                       child: CachedNetworkImage(
                         imageUrl: images.first,
                         fit: BoxFit.cover,
                         width: double.infinity,
+                        height: 200,
+                        placeholder: (context, url) => Container(
+                          height: 200,
+                          color: Colors.white10,
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                        errorWidget: (context, url, error) => Container(
+                          height: 200,
+                          color: Colors.white10,
+                          child: Center(
+                            child: Icon(
+                              Icons.broken_image,
+                              size: 48,
+                              color: Colors.white70,
+                            ),
+                          ),
+                        ),
                       ),
                     )
                   else
-                    SizedBox(
-                      height: 180,
+                    Container(
+                      height: 200,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                       child: Center(
-                        child: Icon(Icons.bed, size: 48, color: Colors.white70),
+                        child: Icon(Icons.bed, size: 64, color: Colors.white),
                       ),
                     ),
-                  const SizedBox(height: 8),
+
+                  const SizedBox(height: 16),
+
+                  // Room details
                   Text(
                     'Room ${data['roomNumber'] ?? '—'}',
-                    style: TextStyle(
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'KES ${(data['price'] as num?)?.toString() ?? '-'} / month',
-                    style: TextStyle(color: Colors.white.withOpacity(0.92)),
-                  ),
                   const SizedBox(height: 8),
                   Text(
-                    data['description'] ?? 'No description',
-                    style: TextStyle(color: Colors.white70),
+                    'KES ${(data['price'] as num?)?.toString() ?? '-'} / month',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: Colors.white.withOpacity(0.92),
+                    ),
                   ),
                   const SizedBox(height: 12),
+                  Text(
+                    'Description',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    data['description'] ?? 'No description provided',
+                    style: TextStyle(color: Colors.white.withOpacity(0.85)),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Status',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _getStatusColor(
+                        data['availability'] as String? ?? 'available',
+                      ),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      (data['availability'] as String? ?? 'available')
+                          .toUpperCase(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Action buttons
                   Row(
                     children: [
-                      ElevatedButton(
-                        onPressed: () {
-                          Navigator.of(context).pop();
-                          Navigator.of(context).pushNamed(
-                            '/add-room',
-                            arguments: {
-                              'room': {...data, 'roomID': roomId},
-                            },
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: Color(0xFF052A6E),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            Navigator.of(context).pop();
+                            Navigator.of(context).pushNamed(
+                              '/add-room',
+                              arguments: {
+                                'room': {...data, 'roomID': roomId},
+                              },
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF052A6E),
+                            foregroundColor: Colors.white,
+                          ),
+                          icon: const Icon(Icons.edit),
+                          label: const Text('Edit'),
                         ),
-                        child: const Text('Edit'),
                       ),
                       const SizedBox(width: 8),
-                      OutlinedButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          side: const BorderSide(color: Colors.white),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => Navigator.of(context).pop(),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(color: Colors.white),
+                          ),
+                          icon: const Icon(Icons.close),
+                          label: const Text('Close'),
                         ),
-                        child: const Text('Close'),
                       ),
                     ],
                   ),
@@ -946,5 +1089,18 @@ class _RoomDetailsDialog extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'available':
+        return Colors.green.shade600;
+      case 'occupied':
+        return Colors.red.shade600;
+      case 'maintenance':
+        return Colors.amber.shade700;
+      default:
+        return Colors.grey.shade600;
+    }
   }
 }

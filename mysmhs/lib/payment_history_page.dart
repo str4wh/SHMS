@@ -7,6 +7,14 @@ class PaymentHistoryPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          color: Colors.white,
+          onPressed: () {
+            Navigator.pushReplacementNamed(context, '/admin');
+          },
+          tooltip: 'Back',
+        ),
         title: const Text(
           'Payment History',
           style: TextStyle(color: Colors.white),

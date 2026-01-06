@@ -18,7 +18,6 @@ class MpesaService {
 
   /// Obtain OAuth access token
   Future<String> getAccessToken() async {
-    final uri = Uri.parse('"")');
     // Implementing in a robust way: use OAuth endpoint
     final auth = base64Encode(utf8.encode('$_consumerKey:$_consumerSecret'));
     final resp = await http

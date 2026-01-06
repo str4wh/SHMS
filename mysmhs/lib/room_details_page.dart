@@ -2,17 +2,25 @@
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-class RoomDetailsPage extends StatelessWidget {
+class RoomDetailsPage extends StatefulWidget {
   const RoomDetailsPage({super.key, this.roomId});
   final String? roomId;
+
+  @override
+  State<RoomDetailsPage> createState() => _RoomDetailsPageState();
+}
+
+class _RoomDetailsPageState extends State<RoomDetailsPage> {
+  bool _isBooking = false;
 
   @override
   Widget build(BuildContext context) {
     final args =
         ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
-    final id = roomId ?? args?['roomId'] as String?;
+    final id = widget.roomId ?? args?['roomId'] as String?;
 
     return Scaffold(
       appBar: AppBar(
@@ -241,34 +249,51 @@ class RoomDetailsPage extends StatelessWidget {
                         if (availability.toLowerCase() == 'available')
                           SizedBox(
                             width: double.infinity,
-                            child: ElevatedButton.icon(
-                              onPressed: () {
-                                // Add booking logic here
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      'Booking feature coming soon!',
-                                    ),
+                            child: Semantics(
+                              button: true,
+                              label: 'Book this room',
+                              child: ElevatedButton.icon(
+                                onPressed: _isBooking
+                                    ? null
+                                    : () => _handleBook(context, id, data),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.white,
+                                  foregroundColor: const Color(0xFF052A6E),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
                                   ),
-                                );
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.white,
-                                foregroundColor: const Color(0xFF052A6E),
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 16,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
                                 ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                              icon: const Icon(Icons.book_online),
-                              label: const Text(
-                                'Book This Room',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                                icon: _isBooking
+                                    ? const SizedBox(
+                                        height: 20,
+                                        width: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          valueColor:
+                                              AlwaysStoppedAnimation<Color>(
+                                                Color(0xFF052A6E),
+                                              ),
+                                        ),
+                                      )
+                                    : const Icon(Icons.book_online),
+                                label: _isBooking
+                                    ? const Text(
+                                        'Booking...',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      )
+                                    : const Text(
+                                        'Book This Room',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
                               ),
                             ),
                           ),
@@ -279,6 +304,216 @@ class RoomDetailsPage extends StatelessWidget {
               ),
       ),
     );
+  }
+
+  Future<void> _handleBook(
+    BuildContext context,
+    String roomId,
+    Map<String, dynamic> roomData,
+  ) async {
+    // Validate user logged in
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Not logged in'),
+          content: const Text('You must be logged in to book a room'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    final uid = user.uid;
+
+    // Check user doesn't already have an active/pending booking
+    try {
+      final existing = await FirebaseFirestore.instance
+          .collection('bookings')
+          .where('studentID', isEqualTo: uid)
+          .where('status', whereIn: ['approved', 'pending/approved', 'pending'])
+          .limit(1)
+          .get();
+
+      if (existing.docs.isNotEmpty) {
+        await showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Existing booking'),
+            content: const Text(
+              'You already have an active booking. Cancel your existing booking first.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+    } catch (e) {
+      // Ignore query errors for now; proceed and let transaction catch issues
+    }
+
+    // Ensure room is still available
+    try {
+      final roomSnap = await FirebaseFirestore.instance
+          .collection('rooms')
+          .doc(roomId)
+          .get();
+      final currentAvailability =
+          (roomSnap.data()?['availability'] as String?) ?? 'available';
+      if (currentAvailability.toLowerCase() != 'available') {
+        await showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Room unavailable'),
+            content: const Text(
+              'Sorry, this room was just booked by someone else',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+    } catch (e) {
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Error'),
+          content: Text('Booking failed: $e. Please try again.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Confirm booking'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Room: ${roomData['roomNumber'] ?? '—'}'),
+            const SizedBox(height: 8),
+            Text(
+              'Price: KES ${(roomData['price'] as num?)?.toString() ?? '-'} / month',
+            ),
+            const SizedBox(height: 12),
+            const Text('Are you sure you want to book this room?'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    // Proceed to create booking in a transaction
+    setState(() => _isBooking = true);
+
+    final bookingRef = FirebaseFirestore.instance.collection('bookings').doc();
+    final roomRef = FirebaseFirestore.instance.collection('rooms').doc(roomId);
+    final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
+
+    try {
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final freshRoom = await tx.get(roomRef);
+        if (!freshRoom.exists) throw Exception('Room not found');
+        final availability =
+            (freshRoom.data()?['availability'] as String?) ?? 'available';
+        if (availability.toLowerCase() != 'available')
+          throw Exception('Room no longer available');
+
+        final now = DateTime.now();
+        final end = DateTime.now().add(const Duration(days: 30));
+
+        tx.set(bookingRef, {
+          'studentID': uid,
+          'roomID': roomId,
+          'roomNumber': roomData['roomNumber'] ?? '',
+          'price': roomData['price'] ?? 0,
+          'status': 'approved',
+          'bookingDate': FieldValue.serverTimestamp(),
+          'startDate': Timestamp.fromDate(now),
+          'endDate': Timestamp.fromDate(end),
+        });
+
+        tx.update(roomRef, {
+          'availability': 'occupied',
+          'isOccupied': true,
+          'occupiedBy': uid,
+        });
+
+        tx.set(userRef, {
+          'assignedRoom': roomData['roomNumber'] ?? '',
+          'roomId': roomId,
+        }, SetOptions(merge: true));
+      });
+
+      // Success
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Success'),
+          content: const Text('Room booked successfully!'),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+
+      Navigator.of(context).pushReplacementNamed('/student-dashboard');
+    } catch (e) {
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Booking failed'),
+          content: Text('Booking failed: $e. Please try again.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isBooking = false);
+    }
   }
 
   Color _getStatusColor(String status) {

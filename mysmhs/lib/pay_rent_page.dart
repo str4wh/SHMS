@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:mysmhs/services/connectivity_service.dart';
@@ -61,30 +62,77 @@ class _PayRentPageState extends State<PayRentPage> {
     if (u == null) return;
 
     try {
-      final doc = await FirebaseFirestore.instance.collection('users').doc(u.uid).get();
-      final data = doc.data() ?? {};
-      setState(() {
-        final amt = (data['rentAmount'] as num?)?.toDouble() ?? 0.0;
-        _amount = amt;
-        _amountCtl.text = NumberFormat.decimalPattern().format(_amount);
-        _roomNumber = (data['roomNumber'] as String?) ?? '';
-        _roomCtl.text = _roomNumber;
-        // Prefer phone from profile, else blank
-        final phone = (data['phone'] as String?) ?? '';
-        _phoneCtl.text = phone;
-      });
+      // 1) Get user doc for optional phone
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(u.uid)
+          .get();
+      final userData = userDoc.data() ?? {};
+
+      final phone = (userData['phone'] as String?) ?? '';
+      _phoneCtl.value = TextEditingValue(
+        text: phone,
+        selection: TextSelection.collapsed(offset: phone.length),
+      );
+
+      // 2) Query bookings for this student (note field names in your DB)
+      final bookingQuery = await FirebaseFirestore.instance
+          .collection('bookings')
+          .where('studentID', isEqualTo: u.uid)
+          .where('status', whereIn: ['approved', 'pending/approved'])
+          .limit(1)
+          .get();
+
+      if (bookingQuery.docs.isNotEmpty) {
+        final bookingData = bookingQuery.docs.first.data();
+
+        // Price may be numeric
+        _amount = (bookingData['price'] as num?)?.toDouble() ?? 0.0;
+        final formattedAmount = NumberFormat.decimalPattern().format(_amount);
+        _amountCtl.value = TextEditingValue(
+          text: formattedAmount,
+          selection: TextSelection.collapsed(offset: formattedAmount.length),
+        );
+
+        // Room number may be int or string -- convert to string
+        final roomNum = bookingData['roomNumber'];
+        _roomNumber = roomNum?.toString() ?? '';
+        _roomCtl.value = TextEditingValue(
+          text: _roomNumber,
+          selection: TextSelection.collapsed(offset: _roomNumber.length),
+        );
+      } else {
+        // No booking found - clear amount/room
+        _amount = 0.0;
+        _amountCtl.value = TextEditingValue(
+          text: '0',
+          selection: TextSelection.collapsed(offset: 1),
+        );
+        _roomNumber = '';
+        _roomCtl.value = const TextEditingValue(
+          text: '',
+          selection: TextSelection.collapsed(offset: 0),
+        );
+      }
+
+      setState(() {});
     } catch (e) {
-      // ignore - leave defaults
+      if (kDebugMode) print('Error loading user data: $e');
     }
   }
 
-  InputDecoration _inputDecoration(String label, {String? hint}) => InputDecoration(
+  InputDecoration _inputDecoration(String label, {String? hint}) =>
+      InputDecoration(
         labelText: label,
         hintText: hint,
         filled: true,
         fillColor: Colors.white.withOpacity(0.04),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8.0), borderSide: BorderSide.none),
-        labelStyle: const TextStyle(color: Colors.white70),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8.0),
+          borderSide: BorderSide.none,
+        ),
+        labelStyle: const TextStyle(color: Colors.white),
+        hintStyle: const TextStyle(color: Colors.white),
       );
 
   String? _validatePhone(String? v) {
@@ -114,15 +162,27 @@ class _PayRentPageState extends State<PayRentPage> {
     }
   }
 
-  Future<void> _confirmAndPayOnline(String phone, double amount, String room) async {
+  Future<void> _confirmAndPayOnline(
+    String phone,
+    double amount,
+    String room,
+  ) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Confirm payment'),
-        content: Text('Initiate M-Pesa payment of KES ${NumberFormat.decimalPattern().format(amount)} from $phone?'),
+        content: Text(
+          'Initiate M-Pesa payment of KES ${NumberFormat.decimalPattern().format(amount)} from $phone?',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Confirm')),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Confirm'),
+          ),
         ],
       ),
     );
@@ -136,12 +196,17 @@ class _PayRentPageState extends State<PayRentPage> {
     });
 
     try {
-      final res = await MpesaService().initiateSTKPush(phone: phone, amount: amount, accountReference: 'RENT-$room');
+      final res = await MpesaService().initiateSTKPush(
+        phone: phone,
+        amount: amount,
+        accountReference: 'RENT-$room',
+      );
       if (res['success'] != true || res['checkoutRequestID'] == null) {
         setState(() {
           _loading = false;
           _state = PaymentState.error;
-          _statusMessage = 'Failed to send payment request: ${res['message'] ?? 'Unknown'}';
+          _statusMessage =
+              'Failed to send payment request: ${res['message'] ?? 'Unknown'}';
         });
 
         await showDialog<void>(
@@ -150,7 +215,10 @@ class _PayRentPageState extends State<PayRentPage> {
             title: const Text('Payment error'),
             content: Text(_statusMessage),
             actions: [
-              TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK')),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK'),
+              ),
             ],
           ),
         );
@@ -202,9 +270,14 @@ class _PayRentPageState extends State<PayRentPage> {
           context: context,
           builder: (_) => AlertDialog(
             title: const Text('Success'),
-            content: Text('Payment of KES ${NumberFormat.decimalPattern().format(amount)} completed.'),
+            content: Text(
+              'Payment of KES ${NumberFormat.decimalPattern().format(amount)} completed.',
+            ),
             actions: [
-              ElevatedButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK')),
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK'),
+              ),
             ],
           ),
         );
@@ -218,11 +291,22 @@ class _PayRentPageState extends State<PayRentPage> {
           context: context,
           builder: (_) => AlertDialog(
             title: const Text('Payment not completed'),
-            content: const Text('The payment was not completed. Retry or queue to process when online?'),
+            content: const Text(
+              'The payment was not completed. Retry or queue to process when online?',
+            ),
             actions: [
-              TextButton(onPressed: () => Navigator.of(context).pop('retry'), child: const Text('Retry')),
-              TextButton(onPressed: () => Navigator.of(context).pop('queue'), child: const Text('Queue')),
-              TextButton(onPressed: () => Navigator.of(context).pop('cancel'), child: const Text('Cancel')),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop('retry'),
+                child: const Text('Retry'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop('queue'),
+                child: const Text('Queue'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop('cancel'),
+                child: const Text('Cancel'),
+              ),
             ],
           ),
         );
@@ -246,22 +330,37 @@ class _PayRentPageState extends State<PayRentPage> {
           title: const Text('Payment failed'),
           content: Text('Payment failed: $e'),
           actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK')),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
           ],
         ),
       );
     }
   }
 
-  Future<void> _confirmAndQueue(String phone, double amount, String room) async {
+  Future<void> _confirmAndQueue(
+    String phone,
+    double amount,
+    String room,
+  ) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Queue payment'),
-        content: Text('You are offline. Queue payment of KES ${NumberFormat.decimalPattern().format(amount)} from $phone?'),
+        content: Text(
+          'You are offline. Queue payment of KES ${NumberFormat.decimalPattern().format(amount)} from $phone?',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Queue')),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Queue'),
+          ),
         ],
       ),
     );
@@ -292,9 +391,14 @@ class _PayRentPageState extends State<PayRentPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Queued'),
-        content: const Text('Payment queued. It will sync when connection is restored.'),
+        content: const Text(
+          'Payment queued. It will sync when connection is restored.',
+        ),
         actions: [
-          ElevatedButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK')),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
         ],
       ),
     );
@@ -302,19 +406,25 @@ class _PayRentPageState extends State<PayRentPage> {
 
   @override
   Widget build(BuildContext context) {
-    const gradient = LinearGradient(colors: [Color(0xFF052A6E), Color(0xFF5BC0FF)], begin: Alignment.topLeft, end: Alignment.bottomRight);
+    const gradient = LinearGradient(
+      colors: [Color(0xFF052A6E), Color(0xFF5BC0FF)],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    );
     final mq = MediaQuery.of(context);
 
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
+        iconTheme: const IconThemeData(color: Colors.white),
         title: const Text('Pay Rent', style: TextStyle(color: Colors.white)),
         backgroundColor: const Color(0xFF1E3A8A),
         actions: [
           IconButton(
             icon: const Icon(Icons.history),
             color: Colors.white,
-            onPressed: () => Navigator.of(context).pushNamed('/payment-history'),
+            onPressed: () =>
+                Navigator.of(context).pushNamed('/payment-history'),
             tooltip: 'View Payment History',
           ),
         ],
@@ -336,23 +446,30 @@ class _PayRentPageState extends State<PayRentPage> {
                         return Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: isOnline ? Colors.green.shade700 : Colors.amber.shade700,
+                            color: isOnline
+                                ? Colors.green.shade700
+                                : Colors.amber.shade700,
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Row(
                             children: [
-                              Icon(isOnline ? Icons.wifi : Icons.wifi_off, color: Colors.white),
+                              Icon(
+                                isOnline ? Icons.wifi : Icons.wifi_off,
+                                color: Colors.white,
+                              ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  isOnline ? 'Online' : 'Offline - Payments will be queued',
+                                  isOnline
+                                      ? 'Online'
+                                      : 'Offline - Payments will be queued',
                                   style: const TextStyle(color: Colors.white),
                                 ),
                               ),
                               if (!_isOnline) ...[
                                 const SizedBox(width: 8),
                                 const Icon(Icons.info, color: Colors.white),
-                              ]
+                              ],
                             ],
                           ),
                         );
@@ -368,48 +485,153 @@ class _PayRentPageState extends State<PayRentPage> {
                         final isTablet = w >= 600 && w < 900;
                         final isDesktop = w >= 900;
 
-                        final cardMaxWidth = isDesktop ? 800.0 : (isTablet ? 600.0 : double.infinity);
+                        final cardMaxWidth = isDesktop
+                            ? 800.0
+                            : (isTablet ? 600.0 : double.infinity);
 
                         return Center(
                           child: ConstrainedBox(
                             constraints: BoxConstraints(maxWidth: cardMaxWidth),
                             child: Card(
-                              color: Colors.white.withOpacity(0.06),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              color: Colors.black.withOpacity(0.25),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+
                               child: Padding(
                                 padding: const EdgeInsets.all(16.0),
                                 child: Form(
                                   key: _formKey,
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      Text('Pay Rent', style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.bold)),
+                                      Text(
+                                        'Pay Rent',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleLarge
+                                            ?.copyWith(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                      ),
                                       const SizedBox(height: 12),
 
                                       // Responsive fields
                                       isMobile
                                           ? Column(
                                               children: [
-                                                Semantics(label: 'Phone number input field', hint: 'Enter your M-Pesa phone number starting with 07 or 254', child: TextFormField(controller: _phoneCtl, decoration: _inputDecoration('Phone number', hint: '07XXXXXXXX'), validator: _validatePhone, keyboardType: TextInputType.phone, style: const TextStyle(color: Colors.white))),
+                                                Semantics(
+                                                  label:
+                                                      'Phone number input field',
+                                                  hint:
+                                                      'Enter your M-Pesa phone number starting with 07 or 254',
+                                                  child: TextFormField(
+                                                    controller: _phoneCtl,
+                                                    decoration:
+                                                        _inputDecoration(
+                                                          'Phone number',
+                                                          hint: '07XXXXXXXX',
+                                                        ),
+                                                    validator: _validatePhone,
+                                                    keyboardType:
+                                                        TextInputType.phone,
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                    ),
+                                                  ),
+                                                ),
                                                 const SizedBox(height: 12),
-                                                Semantics(label: 'Amount', child: TextFormField(controller: _amountCtl, decoration: _inputDecoration('Amount'), readOnly: true, style: const TextStyle(color: Colors.white))),
+                                                Semantics(
+                                                  label: 'Amount',
+                                                  child: TextFormField(
+                                                    controller: _amountCtl,
+                                                    decoration:
+                                                        _inputDecoration(
+                                                          'Amount',
+                                                        ),
+                                                    readOnly: true,
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                    ),
+                                                  ),
+                                                ),
                                               ],
                                             )
                                           : Row(
                                               children: [
-                                                Expanded(child: Semantics(label: 'Phone number input field', hint: 'Enter your M-Pesa phone number starting with 07 or 254', child: TextFormField(controller: _phoneCtl, decoration: _inputDecoration('Phone number', hint: '07XXXXXXXX'), validator: _validatePhone, keyboardType: TextInputType.phone, style: const TextStyle(color: Colors.white)))),
+                                                Expanded(
+                                                  child: Semantics(
+                                                    label:
+                                                        'Phone number input field',
+                                                    hint:
+                                                        'Enter your M-Pesa phone number starting with 07 or 254',
+                                                    child: TextFormField(
+                                                      controller: _phoneCtl,
+                                                      decoration:
+                                                          _inputDecoration(
+                                                            'Phone number',
+                                                            hint: '07XXXXXXXX',
+                                                          ),
+                                                      validator: _validatePhone,
+                                                      keyboardType:
+                                                          TextInputType.phone,
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
                                                 const SizedBox(width: 12),
-                                                SizedBox(width: 160, child: Semantics(label: 'Amount', child: TextFormField(controller: _amountCtl, decoration: _inputDecoration('Amount'), readOnly: true, style: const TextStyle(color: Colors.white))))
+                                                SizedBox(
+                                                  width: 160,
+                                                  child: Semantics(
+                                                    label: 'Amount',
+                                                    child: TextFormField(
+                                                      controller: _amountCtl,
+                                                      decoration:
+                                                          _inputDecoration(
+                                                            'Amount',
+                                                          ),
+                                                      readOnly: true,
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
                                               ],
                                             ),
 
                                       const SizedBox(height: 12),
-                                      Semantics(label: 'Room number', child: TextFormField(controller: _roomCtl, decoration: _inputDecoration('Room number'), readOnly: true, style: const TextStyle(color: Colors.white))),
+                                      Semantics(
+                                        label: 'Room number',
+                                        child: TextFormField(
+                                          controller: _roomCtl,
+                                          decoration: _inputDecoration(
+                                            'Room number',
+                                          ),
+                                          readOnly: true,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
 
                                       const SizedBox(height: 18),
 
                                       // Status message (live region)
-                                      Semantics(liveRegion: true, label: _statusMessage, child: Text(_statusMessage, style: const TextStyle(color: Colors.white70))),
+                                      Semantics(
+                                        liveRegion: true,
+                                        label: _statusMessage,
+                                        child: Text(
+                                          _statusMessage,
+                                          style: const TextStyle(
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                      ),
 
                                       const SizedBox(height: 12),
 
@@ -418,26 +640,55 @@ class _PayRentPageState extends State<PayRentPage> {
                                           Expanded(
                                             child: Semantics(
                                               button: true,
-                                              label: 'Pay ${NumberFormat.decimalPattern().format(_amount)} KES with M-Pesa',
+                                              label:
+                                                  'Pay ${NumberFormat.decimalPattern().format(_amount)} KES with M-Pesa',
                                               enabled: !_loading,
                                               child: ElevatedButton(
-                                                onPressed: _loading ? null : _payPressed,
+                                                onPressed: _loading
+                                                    ? null
+                                                    : _payPressed,
                                                 style: ElevatedButton.styleFrom(
-                                                  backgroundColor: const Color(0xFF00B848),
+                                                  backgroundColor: const Color(
+                                                    0xFF00B848,
+                                                  ),
                                                   foregroundColor: Colors.white,
-                                                  minimumSize: const Size(0, 50),
+                                                  minimumSize: const Size(
+                                                    0,
+                                                    50,
+                                                  ),
                                                 ),
                                                 child: _loading
-                                                    ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white), strokeWidth: 2))
-                                                    : const Text('Pay with M-Pesa'),
+                                                    ? const SizedBox(
+                                                        height: 20,
+                                                        width: 20,
+                                                        child: CircularProgressIndicator(
+                                                          valueColor:
+                                                              AlwaysStoppedAnimation<
+                                                                Color
+                                                              >(Colors.white),
+                                                          strokeWidth: 2,
+                                                        ),
+                                                      )
+                                                    : const Text(
+                                                        'Pay with M-Pesa',
+                                                      ),
                                               ),
                                             ),
                                           ),
                                           const SizedBox(width: 12),
                                           OutlinedButton(
-                                            onPressed: () => Navigator.of(context).pushNamed('/payment-history'),
-                                            style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white)),
-                                            child: const Text('View Payment History'),
+                                            onPressed: () => Navigator.of(
+                                              context,
+                                            ).pushNamed('/payment-history'),
+                                            style: OutlinedButton.styleFrom(
+                                              foregroundColor: Colors.white,
+                                              side: const BorderSide(
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                            child: const Text(
+                                              'View Payment History',
+                                            ),
                                           ),
                                         ],
                                       ),

@@ -150,7 +150,8 @@ Future<bool> mpesaPaymentHandler(Map<String, dynamic> payload) async {
     final phone = payload['phoneNumber'] as String?;
     final amount = (payload['amount'] as num?)?.toDouble() ?? 0.0;
     final userId = payload['userId'] as String?;
-    final roomNumber = payload['roomNumber'] as String? ?? 'unknown';
+    final roomNumberRaw = payload['roomNumber'];
+    final roomNumber = roomNumberRaw?.toString() ?? 'unknown';
 
     if (phone == null || userId == null || amount <= 0)
       return true; // drop invalid

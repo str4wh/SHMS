@@ -3,6 +3,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 
 class RoomDetailsPage extends StatefulWidget {
@@ -163,7 +164,7 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
                                       MainAxisAlignment.spaceBetween,
                                   children: [
                                     Text(
-                                      'Room ${data['roomNumber'] ?? '—'}',
+                                      'Room ${data['roomNumber']?.toString() ?? '\u2014'}',
                                       style: Theme.of(context)
                                           .textTheme
                                           .headlineSmall
@@ -342,22 +343,198 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
           .get();
 
       if (existing.docs.isNotEmpty) {
-        await showDialog<void>(
+        // Get existing booking details
+        final existingBooking = existing.docs.first;
+        final existingBookingId = existingBooking.id;
+        final existingBookingData = existingBooking.data();
+        final oldRoomNumber =
+            existingBookingData['roomNumber']?.toString() ?? 'Unknown';
+        final oldRoomID = existingBookingData['roomID'] as String?;
+
+        // Ask the user whether they'd like to switch rooms
+        final switchRooms = await showDialog<bool>(
           context: context,
           builder: (_) => AlertDialog(
             title: const Text('Existing booking'),
-            content: const Text(
-              'You already have an active booking. Cancel your existing booking first.',
+            content: Text(
+              'You already have a booking for Room $oldRoomNumber. Do you want to cancel it and book this room instead?',
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('OK'),
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Switch Rooms'),
               ),
             ],
           ),
         );
-        return;
+
+        if (switchRooms != true) return;
+
+        // Show a blocking loading dialog while we process the switch
+        showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => AlertDialog(
+            content: Row(
+              children: const [
+                SizedBox(
+                  height: 24,
+                  width: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Cancelling previous booking and booking the new room...',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+
+        try {
+          // Perform the entire switch (cancel old booking + create new booking + update rooms & user) in a single transaction
+          await FirebaseFirestore.instance.runTransaction((tx) async {
+            final newRoomRef = FirebaseFirestore.instance
+                .collection('rooms')
+                .doc(roomId);
+
+            final newRoomSnap = await tx.get(newRoomRef);
+            if (!newRoomSnap.exists) throw Exception('Room not found');
+
+            final newAvailability =
+                (newRoomSnap.data()?['availability'] as String?) ?? 'available';
+            if (newAvailability.toLowerCase() != 'available')
+              throw Exception('Room no longer available');
+
+            // Cancel old booking if it still exists
+            final oldBookingRef = FirebaseFirestore.instance
+                .collection('bookings')
+                .doc(existingBookingId);
+            final oldBookingSnap = await tx.get(oldBookingRef);
+            if (oldBookingSnap.exists) {
+              tx.update(oldBookingRef, {
+                'status': 'cancelled',
+                'cancelledAt': FieldValue.serverTimestamp(),
+              });
+            }
+
+            // Free old room if it's different from the new one
+            if (oldRoomID != null &&
+                oldRoomID.isNotEmpty &&
+                oldRoomID != roomId) {
+              final oldRoomRef = FirebaseFirestore.instance
+                  .collection('rooms')
+                  .doc(oldRoomID);
+              final oldRoomSnap = await tx.get(oldRoomRef);
+              if (oldRoomSnap.exists) {
+                tx.update(oldRoomRef, {
+                  'availability': 'available',
+                  'isOccupied': false,
+                  'occupiedBy': FieldValue.delete(),
+                });
+              }
+            }
+
+            // Create new booking
+            final bookingRef = FirebaseFirestore.instance
+                .collection('bookings')
+                .doc();
+            final now = DateTime.now();
+            final end = DateTime.now().add(const Duration(days: 30));
+
+            tx.set(bookingRef, {
+              'studentID': uid,
+              'roomID': roomId,
+              'roomNumber': roomData['roomNumber']?.toString() ?? '',
+              'price': roomData['price'] ?? 0,
+              'status': 'approved',
+              'bookingDate': FieldValue.serverTimestamp(),
+              'startDate': Timestamp.fromDate(now),
+              'endDate': Timestamp.fromDate(end),
+            });
+
+            // Mark new room as occupied
+            tx.update(newRoomRef, {
+              'availability': 'occupied',
+              'isOccupied': true,
+              'occupiedBy': uid,
+            });
+
+            // Update user document
+            final userRef = FirebaseFirestore.instance
+                .collection('users')
+                .doc(uid);
+            tx.set(userRef, {
+              'assignedRoom': roomData['roomNumber']?.toString() ?? '',
+              'roomId': roomId,
+            }, SetOptions(merge: true));
+          });
+
+          Navigator.of(context).pop(); // close loading
+
+          // Show success and navigate away
+          await showDialog<void>(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('Success'),
+              content: const Text('Room booked successfully!'),
+              actions: [
+                ElevatedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+
+          Navigator.of(context).pushReplacementNamed('/student-dashboard');
+          return;
+        } on FirebaseException catch (e) {
+          Navigator.of(context).pop();
+          if (kDebugMode)
+            print('FirebaseException during switch: ${e.code} - ${e.message}');
+          await showDialog<void>(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('Cancellation Failed'),
+              content: Text('Failed to switch rooms: ${e.message}'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+          return;
+        } catch (e) {
+          Navigator.of(context).pop();
+          if (kDebugMode) print('Error during switch: $e');
+          await showDialog<void>(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('Error'),
+              content: Text('Failed to switch rooms: $e'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+          return;
+        }
       }
     } catch (e) {
       // Ignore query errors for now; proceed and let transaction catch issues
@@ -415,7 +592,7 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Room: ${roomData['roomNumber'] ?? '—'}'),
+            Text('Room: ${roomData['roomNumber']?.toString() ?? '\u2014'}'),
             const SizedBox(height: 8),
             Text(
               'Price: KES ${(roomData['price'] as num?)?.toString() ?? '-'} / month',
@@ -461,7 +638,7 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
         tx.set(bookingRef, {
           'studentID': uid,
           'roomID': roomId,
-          'roomNumber': roomData['roomNumber'] ?? '',
+          'roomNumber': roomData['roomNumber']?.toString() ?? '',
           'price': roomData['price'] ?? 0,
           'status': 'approved',
           'bookingDate': FieldValue.serverTimestamp(),
@@ -476,7 +653,7 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
         });
 
         tx.set(userRef, {
-          'assignedRoom': roomData['roomNumber'] ?? '',
+          'assignedRoom': roomData['roomNumber']?.toString() ?? '',
           'roomId': roomId,
         }, SetOptions(merge: true));
       });

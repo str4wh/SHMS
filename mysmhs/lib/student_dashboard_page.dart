@@ -134,8 +134,9 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
 
                           final data = snapshot.data?.data() ?? {};
                           final name = data['name'] as String? ?? 'Student';
+                          final assignedRoomRaw = data['assignedRoom'];
                           final assignedRoom =
-                              data['assignedRoom'] as String? ?? '—';
+                              assignedRoomRaw?.toString() ?? '—';
 
                           return _SummaryCard(
                             studentName: name,

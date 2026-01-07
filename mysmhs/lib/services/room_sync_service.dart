@@ -110,7 +110,7 @@ class RoomSyncService {
     try {
       if (kDebugMode) {
         print('🔵 Starting addOrUpdateRoomOnline');
-        print('   Room: ${room['roomNumber']}');
+        print('   Room: ${room['roomNumber']?.toString()}');
         print('   Images count: ${images.length}');
       }
 
@@ -493,7 +493,7 @@ class RoomSyncService {
 
         if (kDebugMode)
           print(
-            '   Syncing room ${room['roomNumber']} (attempt ${attempts + 1})',
+            '   Syncing room ${room['roomNumber']?.toString()} (attempt ${attempts + 1})',
           );
 
         final success = await addOrUpdateRoomOnline(room, images);

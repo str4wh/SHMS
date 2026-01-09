@@ -384,7 +384,7 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
           barrierDismissible: false,
           builder: (_) => AlertDialog(
             content: Row(
-              children: const [
+              children: [
                 SizedBox(
                   height: 24,
                   width: 24,
@@ -402,87 +402,93 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
         );
 
         try {
-          // Perform the entire switch (cancel old booking + create new booking + update rooms & user) in a single transaction
-          await FirebaseFirestore.instance.runTransaction((tx) async {
-            final newRoomRef = FirebaseFirestore.instance
-                .collection('rooms')
-                .doc(roomId);
+          await FirebaseFirestore.instance
+              .runTransaction((tx) async {
+                final newRoomRef = FirebaseFirestore.instance
+                    .collection('rooms')
+                    .doc(roomId);
 
-            final newRoomSnap = await tx.get(newRoomRef);
-            if (!newRoomSnap.exists) throw Exception('Room not found');
+                final newRoomSnap = await tx.get(newRoomRef);
+                if (!newRoomSnap.exists) throw Exception('Room not found');
 
-            final newAvailability =
-                (newRoomSnap.data()?['availability'] as String?) ?? 'available';
-            if (newAvailability.toLowerCase() != 'available')
-              throw Exception('Room no longer available');
+                final newAvailability =
+                    (newRoomSnap.data()?['availability'] as String?) ??
+                    'available';
+                if (newAvailability.toLowerCase() != 'available')
+                  throw Exception('Room no longer available');
 
-            // Cancel old booking if it still exists
-            final oldBookingRef = FirebaseFirestore.instance
-                .collection('bookings')
-                .doc(existingBookingId);
-            final oldBookingSnap = await tx.get(oldBookingRef);
-            if (oldBookingSnap.exists) {
-              tx.update(oldBookingRef, {
-                'status': 'cancelled',
-                'cancelledAt': FieldValue.serverTimestamp(),
-              });
-            }
+                // Cancel old booking if it still exists
+                final oldBookingRef = FirebaseFirestore.instance
+                    .collection('bookings')
+                    .doc(existingBookingId);
+                final oldBookingSnap = await tx.get(oldBookingRef);
+                if (oldBookingSnap.exists) {
+                  tx.update(oldBookingRef, {
+                    'status': 'cancelled',
+                    'cancelledAt': FieldValue.serverTimestamp(),
+                  });
+                }
 
-            // Free old room if it's different from the new one
-            if (oldRoomID != null &&
-                oldRoomID.isNotEmpty &&
-                oldRoomID != roomId) {
-              final oldRoomRef = FirebaseFirestore.instance
-                  .collection('rooms')
-                  .doc(oldRoomID);
-              final oldRoomSnap = await tx.get(oldRoomRef);
-              if (oldRoomSnap.exists) {
-                tx.update(oldRoomRef, {
-                  'availability': 'available',
-                  'isOccupied': false,
-                  'occupiedBy': FieldValue.delete(),
+                // Free old room if it's different from the new one
+                if (oldRoomID != null &&
+                    oldRoomID.isNotEmpty &&
+                    oldRoomID != roomId) {
+                  final oldRoomRef = FirebaseFirestore.instance
+                      .collection('rooms')
+                      .doc(oldRoomID);
+                  final oldRoomSnap = await tx.get(oldRoomRef);
+                  if (oldRoomSnap.exists) {
+                    tx.update(oldRoomRef, {
+                      'availability': 'available',
+                      'isOccupied': false,
+                      'occupiedBy': FieldValue.delete(),
+                    });
+                  }
+                }
+
+                // Create new booking
+                final bookingRef = FirebaseFirestore.instance
+                    .collection('bookings')
+                    .doc();
+                final now = DateTime.now();
+                final end = DateTime.now().add(const Duration(days: 30));
+
+                tx.set(bookingRef, {
+                  'studentID': uid,
+                  'roomID': roomId,
+                  'roomNumber': roomData['roomNumber']?.toString() ?? '',
+                  'price': roomData['price'] ?? 0,
+                  'status': 'approved',
+                  'bookingDate': FieldValue.serverTimestamp(),
+                  'startDate': Timestamp.fromDate(now),
+                  'endDate': Timestamp.fromDate(end),
                 });
-              }
-            }
 
-            // Create new booking
-            final bookingRef = FirebaseFirestore.instance
-                .collection('bookings')
-                .doc();
-            final now = DateTime.now();
-            final end = DateTime.now().add(const Duration(days: 30));
+                // Mark new room as occupied
+                tx.update(newRoomRef, {
+                  'availability': 'occupied',
+                  'isOccupied': true,
+                  'occupiedBy': uid,
+                });
 
-            tx.set(bookingRef, {
-              'studentID': uid,
-              'roomID': roomId,
-              'roomNumber': roomData['roomNumber']?.toString() ?? '',
-              'price': roomData['price'] ?? 0,
-              'status': 'approved',
-              'bookingDate': FieldValue.serverTimestamp(),
-              'startDate': Timestamp.fromDate(now),
-              'endDate': Timestamp.fromDate(end),
-            });
+                // Update user document
+                final userRef = FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(uid);
+                tx.set(userRef, {
+                  'assignedRoom': roomData['roomNumber']?.toString() ?? '',
+                  'roomId': roomId,
+                }, SetOptions(merge: true));
+              })
+              .catchError((error) {
+                throw Exception('Transaction failed: $error');
+              });
 
-            // Mark new room as occupied
-            tx.update(newRoomRef, {
-              'availability': 'occupied',
-              'isOccupied': true,
-              'occupiedBy': uid,
-            });
-
-            // Update user document
-            final userRef = FirebaseFirestore.instance
-                .collection('users')
-                .doc(uid);
-            tx.set(userRef, {
-              'assignedRoom': roomData['roomNumber']?.toString() ?? '',
-              'roomId': roomId,
-            }, SetOptions(merge: true));
-          });
-
+          if (!mounted) return;
           Navigator.of(context).pop(); // close loading
 
           // Show success and navigate away
+          if (!mounted) return;
           await showDialog<void>(
             context: context,
             builder: (_) => AlertDialog(
@@ -497,12 +503,14 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
             ),
           );
 
+          if (!mounted) return;
           Navigator.of(context).pushReplacementNamed('/student-dashboard');
           return;
         } on FirebaseException catch (e) {
-          Navigator.of(context).pop();
+          if (mounted) Navigator.of(context).pop();
           if (kDebugMode)
             print('FirebaseException during switch: ${e.code} - ${e.message}');
+          if (!mounted) return;
           await showDialog<void>(
             context: context,
             builder: (_) => AlertDialog(
@@ -518,8 +526,9 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
           );
           return;
         } catch (e) {
-          Navigator.of(context).pop();
+          if (mounted) Navigator.of(context).pop();
           if (kDebugMode) print('Error during switch: $e');
+          if (!mounted) return;
           await showDialog<void>(
             context: context,
             builder: (_) => AlertDialog(

@@ -1,94 +1,44 @@
 // ignore_for_file: avoid_print
 
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-/// Minimal M-Pesa STK Push service for sandbox/testing purposes.
-/// NOTE: Replace credentials with secure configuration (env/remote config) for production.
+/// M-Pesa STK Push service using Firebase Cloud Functions.
+/// This implementation uses Cloud Functions to avoid CORS errors and keep credentials secure.
 class MpesaService {
-  // TODO: Replace with secure storage / remote config
-  static const String _consumerKey = 'YOUR_CONSUMER_KEY';
-  static const String _consumerSecret = 'YOUR_CONSUMER_SECRET';
-  static const String _shortCode = '174379'; // Sandbox
-  static const String _passkey = 'YOUR_PASSKEY';
-  static const String _baseUrl = 'https://sandbox.safaricom.co.ke';
-  static const String _callbackUrl = 'https://example.com/mpesa-callback';
-
-  /// Obtain OAuth access token
-  Future<String> getAccessToken() async {
-    // Implementing in a robust way: use OAuth endpoint
-    final auth = base64Encode(utf8.encode('$_consumerKey:$_consumerSecret'));
-    final resp = await http
-        .get(
-          Uri.parse(
-            'https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials',
-          ),
-          headers: {'Authorization': 'Basic $auth'},
-        )
-        .timeout(const Duration(seconds: 10));
-
-    if (resp.statusCode != 200)
-      throw Exception('Failed to get token: ${resp.statusCode}');
-    final j = jsonDecode(resp.body) as Map<String, dynamic>;
-    return j['access_token'] as String;
-  }
+  final FirebaseFunctions _functions = FirebaseFunctions.instanceFor(
+    region: 'us-central1',
+  );
 
   /// Initiate STK Push. Returns a map with keys: success(bool), message, checkoutRequestID, receiptNumber?
+  ///
+  /// Maintains backward compatibility with the old service interface.
   Future<Map<String, dynamic>> initiateSTKPush({
     required String phone,
     required double amount,
     required String accountReference,
   }) async {
     try {
-      final token = await getAccessToken();
-      final timestamp = DateTime.now()
-          .toUtc()
-          .toIso8601String()
-          .replaceAll(RegExp(r'[^0-9]'), '')
-          .substring(0, 14);
-      // password is base64 of shortcode+passkey+timestamp
-      final password = base64Encode(
-        utf8.encode('$_shortCode$_passkey$timestamp'),
-      );
+      // Extract room number from accountReference (format: 'RENT-{roomNumber}')
+      final roomNumber = accountReference.replaceFirst('RENT-', '');
 
-      final body = {
-        'BusinessShortCode': _shortCode,
-        'Password': password,
-        'Timestamp': timestamp,
-        'TransactionType': 'CustomerPayBillOnline',
-        'Amount': amount.toStringAsFixed(0),
-        'PartyA': phone,
-        'PartyB': _shortCode,
-        'PhoneNumber': phone,
-        'CallBackURL': _callbackUrl,
-        'AccountReference': accountReference,
-        'TransactionDesc': 'Rent payment',
-      };
+      final callable = _functions.httpsCallable('initiateMpesaPayment');
 
-      final resp = await http
-          .post(
-            Uri.parse('$_baseUrl/mpesa/stkpush/v1/processrequest'),
-            headers: {
-              'Authorization': 'Bearer $token',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode(body),
-          )
-          .timeout(const Duration(seconds: 15));
+      final result = await callable.call({
+        'phoneNumber': phone,
+        'amount': amount,
+        'roomNumber': roomNumber,
+      });
 
-      final j = jsonDecode(resp.body) as Map<String, dynamic>;
+      if (kDebugMode) print('STK Push response: ${result.data}');
 
-      if (kDebugMode) print('STK Push response: $j');
-
-      final success = j['ResponseCode'] == '0' || j['ResponseCode'] == 0;
-
+      // Map Cloud Function response to match old service format
       return {
-        'success': success,
-        'raw': j,
-        'checkoutRequestID': j['CheckoutRequestID'] ?? j['checkoutRequestID'],
-        'message': j['ResponseDescription'] ?? j['message'] ?? '',
+        'success': result.data['success'] ?? false,
+        'checkoutRequestID': result.data['checkoutRequestID'],
+        'message': result.data['message'] ?? '',
+        'raw': result.data, // Include raw response for backward compatibility
       };
     } catch (e) {
       if (kDebugMode) print('STK Push failed: $e');
@@ -97,43 +47,26 @@ class MpesaService {
   }
 
   /// Query STK Push status by checkoutRequestID. Returns one of: 'pending','completed','failed'
+  ///
+  /// Maintains backward compatibility with the old service interface.
   Future<String> querySTKPushStatus(String checkoutRequestID) async {
     try {
-      final token = await getAccessToken();
-      final body = {
-        'BusinessShortCode': _shortCode,
-        'Password': base64Encode(
-          utf8.encode(
-            '$_shortCode$_passkey${DateTime.now().toUtc().toIso8601String().replaceAll(RegExp(r'[^0-9]'), '').substring(0, 14)}',
-          ),
-        ),
-        'Timestamp': DateTime.now()
-            .toUtc()
-            .toIso8601String()
-            .replaceAll(RegExp(r'[^0-9]'), '')
-            .substring(0, 14),
-        'CheckoutRequestID': checkoutRequestID,
-      };
+      final callable = _functions.httpsCallable('checkPaymentStatus');
 
-      final resp = await http
-          .post(
-            Uri.parse('$_baseUrl/mpesa/stkpushquery/v1/query'),
-            headers: {
-              'Authorization': 'Bearer $token',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode(body),
-          )
-          .timeout(const Duration(seconds: 15));
+      final result = await callable.call({
+        'checkoutRequestID': checkoutRequestID,
+      });
 
-      final j = jsonDecode(resp.body) as Map<String, dynamic>;
-      if (kDebugMode) print('STK Query response: $j');
+      if (kDebugMode) print('STK Query response: ${result.data}');
 
-      // Interpret response
-      final code = j['ResponseCode']?.toString();
-      if (code == '0') return 'completed';
-      if (code == '1032' || code == '1' || code == '2020') return 'pending';
-      return 'failed';
+      // Map Cloud Function response to match old service format
+      final status = result.data['status'] as String? ?? 'unknown';
+
+      if (status == 'completed') return 'completed';
+      if (status == 'pending') return 'pending';
+      if (status == 'failed') return 'failed';
+
+      return 'pending'; // Default to pending for unknown statuses
     } catch (e) {
       if (kDebugMode) print('STK Query failed: $e');
       return 'failed';
@@ -153,8 +86,9 @@ Future<bool> mpesaPaymentHandler(Map<String, dynamic> payload) async {
     final roomNumberRaw = payload['roomNumber'];
     final roomNumber = roomNumberRaw?.toString() ?? 'unknown';
 
-    if (phone == null || userId == null || amount <= 0)
+    if (phone == null || userId == null || amount <= 0) {
       return true; // drop invalid
+    }
 
     final result = await mpesa.initiateSTKPush(
       phone: phone,

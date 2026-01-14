@@ -629,12 +629,20 @@ class __AdminRoomCardState extends State<_AdminRoomCard> {
                               ),
                             ),
                           ),
-                          errorWidget: (context, url, err) => Center(
-                            child: Icon(
-                              Icons.broken_image,
-                              color: Colors.white,
-                            ),
-                          ),
+                          errorWidget: (context, url, err) {
+                            if (kIsWeb) {
+                              print(
+                                '❌ [Admin Rooms Card] Failed to load image: $url',
+                              );
+                              print('   Error: $err');
+                            }
+                            return Center(
+                              child: Icon(
+                                Icons.broken_image,
+                                color: Colors.white,
+                              ),
+                            );
+                          },
                         );
                       },
                     ),
@@ -958,17 +966,25 @@ class _RoomDetailsDialog extends StatelessWidget {
                             ),
                           ),
                         ),
-                        errorWidget: (context, url, error) => Container(
-                          height: 200,
-                          color: Colors.white10,
-                          child: Center(
-                            child: Icon(
-                              Icons.broken_image,
-                              size: 48,
-                              color: Colors.white70,
+                        errorWidget: (context, url, error) {
+                          if (kIsWeb) {
+                            print(
+                              '❌ [Admin Rooms Modal] Failed to load image: $url',
+                            );
+                            print('   Error: $error');
+                          }
+                          return Container(
+                            height: 200,
+                            color: Colors.white10,
+                            child: Center(
+                              child: Icon(
+                                Icons.broken_image,
+                                size: 48,
+                                color: Colors.white70,
+                              ),
                             ),
-                          ),
-                        ),
+                          );
+                        },
                       ),
                     )
                   else

@@ -10,7 +10,7 @@ import 'package:intl/intl.dart';
 import 'package:mysmhs/services/connectivity_service.dart';
 import 'package:mysmhs/services/local_cache_service.dart';
 import 'package:mysmhs/services/sync_manager.dart';
-import 'package:mysmhs/services/mpesa_service.dart';
+import 'package:mysmhs/services/mpesa_cloud_service.dart';
 
 enum PaymentState { initial, loading, waitingPin, queued, success, error }
 
@@ -67,13 +67,18 @@ class _PayRentPageState extends State<PayRentPage> {
           .collection('users')
           .doc(u.uid)
           .get();
+
+      if (!mounted) return;
+
       final userData = userDoc.data() ?? {};
 
       final phone = (userData['phone'] as String?) ?? '';
-      _phoneCtl.value = TextEditingValue(
-        text: phone,
-        selection: TextSelection.collapsed(offset: phone.length),
-      );
+      if (mounted) {
+        _phoneCtl.value = TextEditingValue(
+          text: phone,
+          selection: TextSelection.collapsed(offset: phone.length),
+        );
+      }
 
       // 2) Query bookings for this student (note field names in your DB)
       final bookingQuery = await FirebaseFirestore.instance
@@ -83,39 +88,51 @@ class _PayRentPageState extends State<PayRentPage> {
           .limit(1)
           .get();
 
+      if (!mounted) return;
+
       if (bookingQuery.docs.isNotEmpty) {
         final bookingData = bookingQuery.docs.first.data();
 
         // Price may be numeric
         _amount = (bookingData['price'] as num?)?.toDouble() ?? 0.0;
         final formattedAmount = NumberFormat.decimalPattern().format(_amount);
-        _amountCtl.value = TextEditingValue(
-          text: formattedAmount,
-          selection: TextSelection.collapsed(offset: formattedAmount.length),
-        );
+        if (mounted) {
+          _amountCtl.value = TextEditingValue(
+            text: formattedAmount,
+            selection: TextSelection.collapsed(offset: formattedAmount.length),
+          );
+        }
 
         // Room number may be int or string -- convert to string
         final roomNum = bookingData['roomNumber'];
         _roomNumber = roomNum?.toString() ?? '';
-        _roomCtl.value = TextEditingValue(
-          text: _roomNumber,
-          selection: TextSelection.collapsed(offset: _roomNumber.length),
-        );
+        if (mounted) {
+          _roomCtl.value = TextEditingValue(
+            text: _roomNumber,
+            selection: TextSelection.collapsed(offset: _roomNumber.length),
+          );
+        }
       } else {
         // No booking found - clear amount/room
         _amount = 0.0;
-        _amountCtl.value = TextEditingValue(
-          text: '0',
-          selection: TextSelection.collapsed(offset: 1),
-        );
+        if (mounted) {
+          _amountCtl.value = TextEditingValue(
+            text: '0',
+            selection: TextSelection.collapsed(offset: 1),
+          );
+        }
         _roomNumber = '';
-        _roomCtl.value = const TextEditingValue(
-          text: '',
-          selection: TextSelection.collapsed(offset: 0),
-        );
+        if (mounted) {
+          _roomCtl.value = const TextEditingValue(
+            text: '',
+            selection: TextSelection.collapsed(offset: 0),
+          );
+        }
       }
 
-      setState(() {});
+      if (mounted) {
+        setState(() {});
+      }
     } catch (e) {
       if (kDebugMode) print('Error loading user data: $e');
     }
@@ -167,6 +184,71 @@ class _PayRentPageState extends State<PayRentPage> {
     double amount,
     String room,
   ) async {
+    // Verify user is authenticated
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _state = PaymentState.error;
+          _statusMessage = 'User not authenticated. Please log in again.';
+        });
+      }
+
+      if (!mounted) return;
+
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Authentication Required'),
+          content: const Text('You must be logged in to make a payment.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // Refresh the auth token to ensure it's valid
+    try {
+      await user.getIdToken(true);
+    } catch (e) {
+      if (kDebugMode) print('Token refresh failed: $e');
+
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _state = PaymentState.error;
+          _statusMessage = 'Authentication failed. Please log in again.';
+        });
+      }
+
+      if (!mounted) return;
+
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Authentication Error'),
+          content: const Text(
+            'Failed to refresh authentication. Please log in again.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -189,25 +271,35 @@ class _PayRentPageState extends State<PayRentPage> {
 
     if (confirmed != true) return;
 
-    setState(() {
-      _loading = true;
-      _state = PaymentState.loading;
-      _statusMessage = 'Sending payment request...';
-    });
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _state = PaymentState.loading;
+        _statusMessage = 'Sending payment request...';
+      });
+    }
 
     try {
-      final res = await MpesaService().initiateSTKPush(
-        phone: phone,
+      final mpesaService = MpesaCloudService();
+
+      // Initiate payment using Cloud Functions service
+      final res = await mpesaService.initiatePayment(
+        phoneNumber: phone,
         amount: amount,
-        accountReference: 'RENT-$room',
+        roomNumber: room,
       );
+
       if (res['success'] != true || res['checkoutRequestID'] == null) {
-        setState(() {
-          _loading = false;
-          _state = PaymentState.error;
-          _statusMessage =
-              'Failed to send payment request: ${res['message'] ?? 'Unknown'}';
-        });
+        if (mounted) {
+          setState(() {
+            _loading = false;
+            _state = PaymentState.error;
+            _statusMessage =
+                'Failed to send payment request: ${res['message'] ?? 'Unknown'}';
+          });
+        }
+
+        if (!mounted) return;
 
         await showDialog<void>(
           context: context,
@@ -226,17 +318,20 @@ class _PayRentPageState extends State<PayRentPage> {
       }
 
       // Now poll for status up to 60s
-      setState(() {
-        _state = PaymentState.waitingPin;
-        _statusMessage = 'Check your phone for the M-Pesa prompt';
-      });
+      if (mounted) {
+        setState(() {
+          _state = PaymentState.waitingPin;
+          _statusMessage = 'Check your phone for the M-Pesa prompt';
+        });
+      }
 
       final checkout = res['checkoutRequestID'] as String;
       final end = DateTime.now().add(const Duration(seconds: 60));
       var completed = false;
       while (DateTime.now().isBefore(end)) {
         await Future.delayed(const Duration(seconds: 5));
-        final status = await MpesaService().querySTKPushStatus(checkout);
+        final statusResult = await mpesaService.checkPaymentStatus(checkout);
+        final status = statusResult['status'] as String;
         if (status == 'completed') {
           completed = true;
           break;
@@ -244,7 +339,11 @@ class _PayRentPageState extends State<PayRentPage> {
         if (status == 'failed') break;
       }
 
-      setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+
+      if (!mounted) return;
 
       if (completed) {
         // Save to Firestore
@@ -254,17 +353,21 @@ class _PayRentPageState extends State<PayRentPage> {
           'roomNumber': room,
           'amount': amount,
           'phoneNumber': phone,
-          'mpesaReceiptNumber': res['raw']?['CheckoutRequestID'] ?? checkout,
+          'mpesaReceiptNumber': checkout,
           'transactionDate': FieldValue.serverTimestamp(),
           'status': 'completed',
           'checkoutRequestID': checkout,
           'completedAt': DateTime.now().toIso8601String(),
         });
 
-        setState(() {
-          _state = PaymentState.success;
-          _statusMessage = 'Payment completed!';
-        });
+        if (mounted) {
+          setState(() {
+            _state = PaymentState.success;
+            _statusMessage = 'Payment completed!';
+          });
+        }
+
+        if (!mounted) return;
 
         await showDialog<void>(
           context: context,
@@ -282,10 +385,14 @@ class _PayRentPageState extends State<PayRentPage> {
           ),
         );
       } else {
-        setState(() {
-          _state = PaymentState.error;
-          _statusMessage = 'Payment timed out or failed';
-        });
+        if (mounted) {
+          setState(() {
+            _state = PaymentState.error;
+            _statusMessage = 'Payment timed out or failed';
+          });
+        }
+
+        if (!mounted) return;
 
         final choice = await showDialog<String>(
           context: context,
@@ -318,11 +425,15 @@ class _PayRentPageState extends State<PayRentPage> {
         }
       }
     } catch (e) {
-      setState(() {
-        _loading = false;
-        _state = PaymentState.error;
-        _statusMessage = 'Payment failed: $e';
-      });
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _state = PaymentState.error;
+          _statusMessage = 'Payment failed: $e';
+        });
+      }
+
+      if (!mounted) return;
 
       await showDialog<void>(
         context: context,

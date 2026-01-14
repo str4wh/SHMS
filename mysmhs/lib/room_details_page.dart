@@ -117,17 +117,25 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
                                   ),
                                 ),
                               ),
-                              errorWidget: (context, url, error) => Container(
-                                height: 250,
-                                color: Colors.white10,
-                                child: const Center(
-                                  child: Icon(
-                                    Icons.broken_image,
-                                    size: 64,
-                                    color: Colors.white70,
+                              errorWidget: (context, url, error) {
+                                if (kDebugMode) {
+                                  print(
+                                    '❌ [Room Details] Failed to load image: $url',
+                                  );
+                                  print('   Error: $error');
+                                }
+                                return Container(
+                                  height: 250,
+                                  color: Colors.white10,
+                                  child: const Center(
+                                    child: Icon(
+                                      Icons.broken_image,
+                                      size: 64,
+                                      color: Colors.white70,
+                                    ),
                                   ),
-                                ),
-                              ),
+                                );
+                              },
                             ),
                           )
                         else
@@ -312,9 +320,17 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
     String roomId,
     Map<String, dynamic> roomData,
   ) async {
+    if (kDebugMode) {
+      print('🔵 _handleBook called');
+      print('   Room ID: $roomId');
+      print('   Room Number: ${roomData['roomNumber']}');
+      print('   Room Price: ${roomData['price']}');
+    }
+
     // Validate user logged in
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
+      if (kDebugMode) print('❌ User not logged in');
       await showDialog<void>(
         context: context,
         builder: (_) => AlertDialog(
@@ -332,15 +348,24 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
     }
 
     final uid = user.uid;
+    if (kDebugMode) print('   User UID: $uid');
 
     // Check user doesn't already have an active/pending booking
     try {
+      if (kDebugMode)
+        print(
+          '   🔍 Checking for existing bookings with status: approved, pending/approved, pending',
+        );
+
       final existing = await FirebaseFirestore.instance
           .collection('bookings')
           .where('studentID', isEqualTo: uid)
           .where('status', whereIn: ['approved', 'pending/approved', 'pending'])
           .limit(1)
           .get();
+
+      if (kDebugMode)
+        print('   Found ${existing.docs.length} existing booking(s)');
 
       if (existing.docs.isNotEmpty) {
         // Get existing booking details
@@ -350,6 +375,38 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
         final oldRoomNumber =
             existingBookingData['roomNumber']?.toString() ?? 'Unknown';
         final oldRoomID = existingBookingData['roomID'] as String?;
+        final oldStatus = existingBookingData['status'] as String?;
+
+        if (kDebugMode) {
+          print('   📋 Existing booking found:');
+          print('      Booking ID: $existingBookingId');
+          print('      Old Room Number: $oldRoomNumber');
+          print('      Old Room ID: $oldRoomID');
+          print('      Status: $oldStatus');
+          print('      New Room ID: $roomId');
+          print('      Same room? ${oldRoomID == roomId}');
+        }
+
+        // If trying to book the same room, show a different message
+        if (oldRoomID == roomId) {
+          if (kDebugMode) print('   ⚠️ User trying to rebook the same room');
+          await showDialog<void>(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('Already Booked'),
+              content: Text(
+                'You already have an active booking for Room $oldRoomNumber.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+          return;
+        }
 
         // Ask the user whether they'd like to switch rooms
         final switchRooms = await showDialog<bool>(
@@ -376,7 +433,12 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
           ),
         );
 
-        if (switchRooms != true) return;
+        if (switchRooms != true) {
+          if (kDebugMode) print('   ❌ User cancelled room switch');
+          return;
+        }
+
+        if (kDebugMode) print('   ✅ User confirmed room switch');
 
         // Show a blocking loading dialog while we process the switch
         showDialog<void>(
@@ -402,87 +464,173 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
         );
 
         try {
-          await FirebaseFirestore.instance
-              .runTransaction((tx) async {
-                final newRoomRef = FirebaseFirestore.instance
-                    .collection('rooms')
-                    .doc(roomId);
+          if (kDebugMode) print('   🔄 Starting room switch transaction...');
 
-                final newRoomSnap = await tx.get(newRoomRef);
-                if (!newRoomSnap.exists) throw Exception('Room not found');
+          await FirebaseFirestore.instance.runTransaction((tx) async {
+            if (kDebugMode)
+              print('      📖 Transaction started - Reading documents...');
 
-                final newAvailability =
-                    (newRoomSnap.data()?['availability'] as String?) ??
-                    'available';
-                if (newAvailability.toLowerCase() != 'available')
-                  throw Exception('Room no longer available');
+            // STEP 1: Read all documents first (transaction requirement)
+            final newRoomRef = FirebaseFirestore.instance
+                .collection('rooms')
+                .doc(roomId);
+            final oldBookingRef = FirebaseFirestore.instance
+                .collection('bookings')
+                .doc(existingBookingId);
+            final userRef = FirebaseFirestore.instance
+                .collection('users')
+                .doc(uid);
 
-                // Cancel old booking if it still exists
-                final oldBookingRef = FirebaseFirestore.instance
-                    .collection('bookings')
-                    .doc(existingBookingId);
-                final oldBookingSnap = await tx.get(oldBookingRef);
-                if (oldBookingSnap.exists) {
-                  tx.update(oldBookingRef, {
-                    'status': 'cancelled',
-                    'cancelledAt': FieldValue.serverTimestamp(),
-                  });
+            // Read new room
+            final newRoomSnap = await tx.get(newRoomRef);
+            if (!newRoomSnap.exists) {
+              if (kDebugMode) print('      ❌ New room not found: $roomId');
+              throw Exception('Room not found');
+            }
+
+            final newRoomData = newRoomSnap.data()!;
+            final newAvailability =
+                (newRoomData['availability'] as String?) ?? 'available';
+            final newIsOccupied = newRoomData['isOccupied'] as bool? ?? false;
+
+            if (kDebugMode) {
+              print('      ✅ New room read:');
+              print('         Availability: $newAvailability');
+              print('         IsOccupied: $newIsOccupied');
+            }
+
+            if (newAvailability.toLowerCase() != 'available') {
+              if (kDebugMode)
+                print('      ❌ New room not available: $newAvailability');
+              throw Exception('Room no longer available');
+            }
+
+            // Read old booking
+            final oldBookingSnap = await tx.get(oldBookingRef);
+            final oldBookingExists = oldBookingSnap.exists;
+            if (kDebugMode)
+              print('      Old booking exists: $oldBookingExists');
+
+            // Read old room if different
+            DocumentSnapshot? oldRoomSnap;
+            if (oldRoomID != null && oldRoomID.isNotEmpty) {
+              final oldRoomRef = FirebaseFirestore.instance
+                  .collection('rooms')
+                  .doc(oldRoomID);
+              oldRoomSnap = await tx.get(oldRoomRef);
+              if (kDebugMode) {
+                print('      Old room exists: ${oldRoomSnap.exists}');
+                if (oldRoomSnap.exists) {
+                  final oldRoomData =
+                      oldRoomSnap.data() as Map<String, dynamic>?;
+                  print(
+                    '         Old room occupiedBy: ${oldRoomData?['occupiedBy']}',
+                  );
                 }
+              }
+            }
 
-                // Free old room if it's different from the new one
-                if (oldRoomID != null &&
-                    oldRoomID.isNotEmpty &&
-                    oldRoomID != roomId) {
-                  final oldRoomRef = FirebaseFirestore.instance
-                      .collection('rooms')
-                      .doc(oldRoomID);
-                  final oldRoomSnap = await tx.get(oldRoomRef);
-                  if (oldRoomSnap.exists) {
-                    tx.update(oldRoomRef, {
-                      'availability': 'available',
-                      'isOccupied': false,
-                      'occupiedBy': FieldValue.delete(),
-                    });
-                  }
-                }
+            // Read user document to verify
+            final userSnap = await tx.get(userRef);
+            if (kDebugMode) {
+              if (userSnap.exists) {
+                final userData = userSnap.data() as Map<String, dynamic>?;
+                print('      User assignedRoom: ${userData?['assignedRoom']}');
+                print('      User roomId: ${userData?['roomId']}');
+              }
+            }
 
-                // Create new booking
-                final bookingRef = FirebaseFirestore.instance
-                    .collection('bookings')
-                    .doc();
-                final now = DateTime.now();
-                final end = DateTime.now().add(const Duration(days: 30));
+            if (kDebugMode)
+              print('      ✅ All reads complete - Starting writes...');
 
-                tx.set(bookingRef, {
-                  'studentID': uid,
-                  'roomID': roomId,
-                  'roomNumber': roomData['roomNumber']?.toString() ?? '',
-                  'price': roomData['price'] ?? 0,
-                  'status': 'approved',
-                  'bookingDate': FieldValue.serverTimestamp(),
-                  'startDate': Timestamp.fromDate(now),
-                  'endDate': Timestamp.fromDate(end),
-                });
-
-                // Mark new room as occupied
-                tx.update(newRoomRef, {
-                  'availability': 'occupied',
-                  'isOccupied': true,
-                  'occupiedBy': uid,
-                });
-
-                // Update user document
-                final userRef = FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(uid);
-                tx.set(userRef, {
-                  'assignedRoom': roomData['roomNumber']?.toString() ?? '',
-                  'roomId': roomId,
-                }, SetOptions(merge: true));
-              })
-              .catchError((error) {
-                throw Exception('Transaction failed: $error');
+            // STEP 2: Write operations
+            // Cancel old booking if it still exists
+            if (oldBookingExists) {
+              if (kDebugMode)
+                print('      📝 Cancelling old booking: $existingBookingId');
+              tx.update(oldBookingRef, {
+                'status': 'cancelled',
+                'cancelledAt': FieldValue.serverTimestamp(),
               });
+            }
+
+            // Free old room if it exists and is different from new one
+            if (oldRoomSnap != null && oldRoomSnap.exists) {
+              if (kDebugMode) print('      📝 Freeing old room: $oldRoomID');
+              tx.update(oldRoomSnap.reference, {
+                'availability': 'available',
+                'isOccupied': false,
+                'occupiedBy': FieldValue.delete(),
+              });
+            }
+
+            // Create new booking
+            final bookingRef = FirebaseFirestore.instance
+                .collection('bookings')
+                .doc();
+            final now = DateTime.now();
+            final end = DateTime.now().add(const Duration(days: 30));
+
+            // Validate roomData before creating booking
+            final roomNumber = roomData['roomNumber']?.toString() ?? '';
+            final price = (roomData['price'] as num?)?.toDouble() ?? 0.0;
+
+            if (roomNumber.isEmpty) {
+              if (kDebugMode) print('      ❌ Room number is empty');
+              throw Exception('Invalid room data: missing room number');
+            }
+
+            if (kDebugMode) {
+              print('      📝 Creating new booking:');
+              print('         Booking ID: ${bookingRef.id}');
+              print('         Room Number: $roomNumber');
+              print('         Price: $price');
+            }
+
+            tx.set(bookingRef, {
+              'studentID': uid,
+              'roomID': roomId,
+              'roomNumber': roomNumber, // Keep as string for bookings
+              'price': price,
+              'status': 'approved',
+              'bookingDate': FieldValue.serverTimestamp(),
+              'startDate': Timestamp.fromDate(now),
+              'endDate': Timestamp.fromDate(end),
+            });
+
+            // Mark new room as occupied
+            if (kDebugMode)
+              print('      📝 Marking new room as occupied: $roomId');
+            tx.update(newRoomRef, {
+              'availability': 'occupied',
+              'isOccupied': true,
+              'occupiedBy': uid,
+            });
+
+            // Update user document - convert roomNumber to int to match Firestore schema
+            final roomNumberInt = int.tryParse(roomNumber) ?? 0;
+            if (roomNumberInt == 0 && roomNumber != '0') {
+              if (kDebugMode)
+                print(
+                  '      ⚠️ Warning: Could not parse room number "$roomNumber" to int',
+                );
+            }
+
+            if (kDebugMode) {
+              print('      📝 Updating user document:');
+              print('         assignedRoom: $roomNumberInt (int)');
+              print('         roomId: $roomId');
+            }
+
+            tx.set(userRef, {
+              'assignedRoom': roomNumberInt, // Store as number, not string
+              'roomId': roomId,
+            }, SetOptions(merge: true));
+
+            if (kDebugMode) print('      ✅ All writes queued successfully');
+          });
+
+          if (kDebugMode) print('   ✅ Transaction committed successfully');
 
           if (!mounted) return;
           Navigator.of(context).pop(); // close loading
@@ -493,7 +641,7 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
             context: context,
             builder: (_) => AlertDialog(
               title: const Text('Success'),
-              content: const Text('Room booked successfully!'),
+              content: const Text('Room switched successfully!'),
               actions: [
                 ElevatedButton(
                   onPressed: () => Navigator.of(context).pop(),
@@ -508,14 +656,21 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
           return;
         } on FirebaseException catch (e) {
           if (mounted) Navigator.of(context).pop();
-          if (kDebugMode)
-            print('FirebaseException during switch: ${e.code} - ${e.message}');
+          if (kDebugMode) {
+            print('❌ FirebaseException during switch:');
+            print('   Code: ${e.code}');
+            print('   Message: ${e.message}');
+            print('   Plugin: ${e.plugin}');
+            print('   Stack: ${e.stackTrace}');
+          }
           if (!mounted) return;
           await showDialog<void>(
             context: context,
             builder: (_) => AlertDialog(
-              title: const Text('Cancellation Failed'),
-              content: Text('Failed to switch rooms: ${e.message}'),
+              title: const Text('Switch Failed'),
+              content: Text(
+                'Failed to switch rooms: ${e.message ?? e.code}\n\nPlease try again or contact support if the problem persists.',
+              ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
@@ -525,15 +680,20 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
             ),
           );
           return;
-        } catch (e) {
+        } catch (e, stackTrace) {
           if (mounted) Navigator.of(context).pop();
-          if (kDebugMode) print('Error during switch: $e');
+          if (kDebugMode) {
+            print('❌ Error during switch: $e');
+            print('   Stack trace: $stackTrace');
+          }
           if (!mounted) return;
           await showDialog<void>(
             context: context,
             builder: (_) => AlertDialog(
               title: const Text('Error'),
-              content: Text('Failed to switch rooms: $e'),
+              content: Text(
+                'Failed to switch rooms: ${e.toString()}\n\nPlease try again or contact support if the problem persists.',
+              ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
@@ -545,25 +705,74 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
           return;
         }
       }
-    } catch (e) {
-      // Ignore query errors for now; proceed and let transaction catch issues
+    } catch (e, stackTrace) {
+      if (kDebugMode) {
+        print('❌ Error checking existing bookings: $e');
+        print('   Stack trace: $stackTrace');
+      }
+      // Show error to user instead of ignoring
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Error'),
+          content: Text(
+            'Failed to check existing bookings: ${e.toString()}\n\nPlease try again.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
     }
 
     // Ensure room is still available
+    if (kDebugMode)
+      print('   🔍 Checking room availability before confirmation...');
     try {
       final roomSnap = await FirebaseFirestore.instance
           .collection('rooms')
           .doc(roomId)
           .get();
+
+      if (!roomSnap.exists) {
+        if (kDebugMode) print('   ❌ Room document does not exist');
+        await showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Room not found'),
+            content: const Text('This room no longer exists in the system.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
       final currentAvailability =
           (roomSnap.data()?['availability'] as String?) ?? 'available';
+      final isOccupied = roomSnap.data()?['isOccupied'] as bool? ?? false;
+
+      if (kDebugMode) {
+        print('   Room availability: $currentAvailability');
+        print('   Room isOccupied: $isOccupied');
+      }
+
       if (currentAvailability.toLowerCase() != 'available') {
+        if (kDebugMode) print('   ❌ Room not available: $currentAvailability');
         await showDialog<void>(
           context: context,
           builder: (_) => AlertDialog(
             title: const Text('Room unavailable'),
             content: const Text(
-              'Sorry, this room was just booked by someone else',
+              'Sorry, this room was just booked by someone else.',
             ),
             actions: [
               TextButton(
@@ -575,12 +784,20 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
         );
         return;
       }
-    } catch (e) {
+
+      if (kDebugMode) print('   ✅ Room is available');
+    } catch (e, stackTrace) {
+      if (kDebugMode) {
+        print('❌ Error checking room availability: $e');
+        print('   Stack trace: $stackTrace');
+      }
       await showDialog<void>(
         context: context,
         builder: (_) => AlertDialog(
           title: const Text('Error'),
-          content: Text('Booking failed: $e. Please try again.'),
+          content: Text(
+            'Failed to verify room availability: ${e.toString()}\n\nPlease try again.',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
@@ -623,7 +840,12 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
       ),
     );
 
-    if (confirmed != true) return;
+    if (confirmed != true) {
+      if (kDebugMode) print('   ❌ User cancelled booking confirmation');
+      return;
+    }
+
+    if (kDebugMode) print('   ✅ User confirmed booking');
 
     // Proceed to create booking in a transaction
     setState(() => _isBooking = true);
@@ -633,39 +855,106 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
     final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
 
     try {
+      if (kDebugMode) {
+        print('   🔄 Starting booking transaction...');
+        print('      New booking ID: ${bookingRef.id}');
+      }
+
       await FirebaseFirestore.instance.runTransaction((tx) async {
+        if (kDebugMode) print('      📖 Transaction started - Reading room...');
+
+        // Read room to verify availability
         final freshRoom = await tx.get(roomRef);
-        if (!freshRoom.exists) throw Exception('Room not found');
+        if (!freshRoom.exists) {
+          if (kDebugMode) print('      ❌ Room not found in transaction');
+          throw Exception('Room not found');
+        }
+
+        final roomDataTx = freshRoom.data()!;
         final availability =
-            (freshRoom.data()?['availability'] as String?) ?? 'available';
-        if (availability.toLowerCase() != 'available')
+            (roomDataTx['availability'] as String?) ?? 'available';
+        final isOccupied = roomDataTx['isOccupied'] as bool? ?? false;
+        final occupiedBy = roomDataTx['occupiedBy'] as String?;
+
+        if (kDebugMode) {
+          print('      ✅ Room read in transaction:');
+          print('         Availability: $availability');
+          print('         IsOccupied: $isOccupied');
+          print('         OccupiedBy: $occupiedBy');
+        }
+
+        if (availability.toLowerCase() != 'available') {
+          if (kDebugMode)
+            print('      ❌ Room no longer available: $availability');
           throw Exception('Room no longer available');
+        }
+
+        // Validate roomData
+        final roomNumber = roomData['roomNumber']?.toString() ?? '';
+        final price = (roomData['price'] as num?)?.toDouble() ?? 0.0;
+
+        if (roomNumber.isEmpty) {
+          if (kDebugMode) print('      ❌ Room number is empty');
+          throw Exception('Invalid room data: missing room number');
+        }
+
+        if (kDebugMode) print('      ✅ Validation passed - Starting writes...');
 
         final now = DateTime.now();
         final end = DateTime.now().add(const Duration(days: 30));
 
+        // Create booking
+        if (kDebugMode) {
+          print('      📝 Creating booking:');
+          print('         Room Number: $roomNumber');
+          print('         Price: $price');
+          print('         Start: $now');
+          print('         End: $end');
+        }
+
         tx.set(bookingRef, {
           'studentID': uid,
           'roomID': roomId,
-          'roomNumber': roomData['roomNumber']?.toString() ?? '',
-          'price': roomData['price'] ?? 0,
+          'roomNumber': roomNumber, // Keep as string for bookings
+          'price': price,
           'status': 'approved',
           'bookingDate': FieldValue.serverTimestamp(),
           'startDate': Timestamp.fromDate(now),
           'endDate': Timestamp.fromDate(end),
         });
 
+        // Update room status
+        if (kDebugMode) print('      📝 Marking room as occupied');
         tx.update(roomRef, {
           'availability': 'occupied',
           'isOccupied': true,
           'occupiedBy': uid,
         });
 
+        // Update user document - convert roomNumber to int to match Firestore schema
+        final roomNumberInt = int.tryParse(roomNumber) ?? 0;
+        if (roomNumberInt == 0 && roomNumber != '0') {
+          if (kDebugMode)
+            print(
+              '      ⚠️ Warning: Could not parse room number "$roomNumber" to int',
+            );
+        }
+
+        if (kDebugMode) {
+          print('      📝 Updating user document:');
+          print('         assignedRoom: $roomNumberInt (int)');
+          print('         roomId: $roomId');
+        }
+
         tx.set(userRef, {
-          'assignedRoom': roomData['roomNumber']?.toString() ?? '',
+          'assignedRoom': roomNumberInt, // Store as number, not string
           'roomId': roomId,
         }, SetOptions(merge: true));
+
+        if (kDebugMode) print('      ✅ All writes queued successfully');
       });
+
+      if (kDebugMode) print('   ✅ Transaction committed successfully');
 
       // Success
       await showDialog<void>(
@@ -683,12 +972,41 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
       );
 
       Navigator.of(context).pushReplacementNamed('/student-dashboard');
-    } catch (e) {
+    } on FirebaseException catch (e) {
+      if (kDebugMode) {
+        print('❌ FirebaseException during booking:');
+        print('   Code: ${e.code}');
+        print('   Message: ${e.message}');
+        print('   Plugin: ${e.plugin}');
+        print('   Stack: ${e.stackTrace}');
+      }
       await showDialog<void>(
         context: context,
         builder: (_) => AlertDialog(
           title: const Text('Booking failed'),
-          content: Text('Booking failed: $e. Please try again.'),
+          content: Text(
+            'Booking failed: ${e.message ?? e.code}\n\nPlease try again or contact support if the problem persists.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    } catch (e, stackTrace) {
+      if (kDebugMode) {
+        print('❌ Error during booking: $e');
+        print('   Stack trace: $stackTrace');
+      }
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Booking failed'),
+          content: Text(
+            'Booking failed: ${e.toString()}\n\nPlease try again or contact support if the problem persists.',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),

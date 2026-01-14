@@ -9,6 +9,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:image/image.dart' as img;
 import 'dart:math';
 import 'package:hive/hive.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -251,15 +252,43 @@ class RoomSyncService {
     int maxDim = 1024,
     int quality = 70,
   }) async {
-    // On web, flutter_image_compress has no web implementation — skip.
+    // WEB COMPRESSION - NEW
     if (kIsWeb) {
-      if (kDebugMode)
-        print(
-          '   ⚠️ Web platform: skipping compression, using original bytes (${_formatKb(bytes.length)})',
-        );
-      return bytes;
+      try {
+        if (kDebugMode) print('   🔧 Web: Compressing image...');
+
+        final decoded = img.decodeImage(bytes);
+        if (decoded == null) {
+          if (kDebugMode) print('   ⚠️ Cannot decode image, using original');
+          return bytes;
+        }
+
+        img.Image resized = decoded;
+        if (decoded.width > maxDim || decoded.height > maxDim) {
+          resized = img.copyResize(
+            decoded,
+            width: decoded.width > decoded.height ? maxDim : null,
+            height: decoded.height > decoded.width ? maxDim : null,
+          );
+        }
+
+        final compressed = img.encodeJpg(resized, quality: quality);
+        final result = Uint8List.fromList(compressed);
+
+        if (kDebugMode) {
+          print(
+            '   ✅ Web compressed: ${_formatKb(bytes.length)} -> ${_formatKb(result.length)}',
+          );
+        }
+
+        return result.length < bytes.length ? result : bytes;
+      } catch (e) {
+        if (kDebugMode) print('   ❌ Web compression error: $e');
+        return bytes;
+      }
     }
 
+    // MOBILE COMPRESSION - Keep existing flutter_image_compress code
     try {
       final start = DateTime.now();
       final result = await FlutterImageCompress.compressWithList(

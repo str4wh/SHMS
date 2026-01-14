@@ -3,7 +3,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/material.dart';
 
 /// Student Dashboard — main page students see after logging in.
@@ -22,6 +22,16 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (kDebugMode) {
+      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      print('🏠 StudentDashboard build');
+      print(
+        '   Current user email: ${FirebaseAuth.instance.currentUser?.email}',
+      );
+      print('   Current UID: $uid');
+      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    }
+
     final theme = Theme.of(context);
     const _gradient = LinearGradient(
       colors: [Color(0xFF052A6E), Color(0xFF5BC0FF)],
@@ -53,15 +63,20 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
         .snapshots();
     final bookingsStream = FirebaseFirestore.instance
         .collection('bookings')
-        .where('userId', isEqualTo: uid)
-        .snapshots();
+        .where('studentID', isEqualTo: uid) // ✅ CORRECT FIELD
+        .snapshots(); // ✅ No index needed
+
+    if (kDebugMode) {
+      print('📊 Bookings query created for studentID: $uid');
+    }
     final paymentsStream = FirebaseFirestore.instance
         .collection('payments')
-        .where('userId', isEqualTo: uid)
+        .where('studentID', isEqualTo: uid) // ✅ CORRECT FIELD
+        .orderBy('dueDate', descending: false) // ✅ Upcoming first
         .snapshots();
     final maintenanceStream = FirebaseFirestore.instance
         .collection('maintenance_requests')
-        .where('userId', isEqualTo: uid)
+        .where('studentID', isEqualTo: uid) // ✅ CORRECT FIELD
         .where('status', whereIn: ['open', 'pending'])
         .snapshots();
 
@@ -143,6 +158,7 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
                             assignedRoom: assignedRoom,
                             bookingStatusStream: bookingsStream,
                             paymentsStream: paymentsStream,
+                            uid: uid!,
                           );
                         },
                       ),
@@ -462,12 +478,14 @@ class _SummaryCard extends StatelessWidget {
     required this.assignedRoom,
     required this.bookingStatusStream,
     required this.paymentsStream,
+    required this.uid,
   });
 
   final String studentName;
   final String assignedRoom;
   final Stream<QuerySnapshot<Map<String, dynamic>>> bookingStatusStream;
   final Stream<QuerySnapshot<Map<String, dynamic>>> paymentsStream;
+  final String uid;
 
   @override
   Widget build(BuildContext context) {
@@ -512,36 +530,105 @@ class _SummaryCard extends StatelessWidget {
                   StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                     stream: bookingStatusStream,
                     builder: (context, snap) {
-                      if (snap.hasError)
-                        return _statusBadge('Unknown', Colors.white70);
-                      if (snap.connectionState == ConnectionState.waiting)
-                        return _statusBadge('Loading', Colors.white70);
+                      if (kDebugMode) {
+                        print('\n📊 Booking status stream update:');
+                        print('   Current UID (query filter): $uid');
+                        print('   Has error: ${snap.hasError}');
+                        print('   Connection state: ${snap.connectionState}');
+                        print('   Docs count: ${snap.data?.docs.length ?? 0}');
+                      }
+
+                      // Show loading state while waiting
+                      if (snap.connectionState == ConnectionState.waiting) {
+                        return _statusBadge('Loading...', Colors.white70);
+                      }
+
+                      // Handle errors
+                      if (snap.hasError) {
+                        if (kDebugMode)
+                          print('   ❌ Stream error: ${snap.error}');
+                        return _statusBadge('Error', Colors.red.shade400);
+                      }
 
                       final docs = snap.data?.docs ?? [];
-                      final status = docs.isEmpty
-                          ? 'No booking'
-                          : (docs.last.data()['status'] as String? ??
-                                'Unknown');
 
+                      // No bookings found
+                      if (docs.isEmpty) {
+                        if (kDebugMode)
+                          print('   ℹ️ No bookings found for studentID: $uid');
+                        return _statusBadge('No Booking', Colors.grey.shade400);
+                      }
+
+                      // Sort by bookingDate manually (newest first)
+                      final sortedDocs = docs.toList()
+                        ..sort((a, b) {
+                          final aDate = (a.data()['bookingDate'] as Timestamp?)
+                              ?.toDate();
+                          final bDate = (b.data()['bookingDate'] as Timestamp?)
+                              ?.toDate();
+
+                          if (aDate == null && bDate == null) return 0;
+                          if (aDate == null) return 1; // nulls last
+                          if (bDate == null) return -1;
+
+                          return bDate.compareTo(
+                            aDate,
+                          ); // Descending (newest first)
+                        });
+
+                      // Get the most recent booking
+                      final latestBooking = sortedDocs.first;
+                      final bookingData = latestBooking.data();
+                      final status =
+                          (bookingData['status'] as String?)
+                              ?.toLowerCase()
+                              .trim() ??
+                          '';
+
+                      if (kDebugMode) {
+                        print('   ✅ Latest booking found:');
+                        print('      Booking ID: ${latestBooking.id}');
+                        print('      Status (raw): "${bookingData['status']}"');
+                        print('      Status (processed): "$status"');
+                        print(
+                          '      Room Number: ${bookingData['roomNumber']}',
+                        );
+                      }
+
+                      // Map Firebase status to display status
                       Color badgeColor;
-                      switch (status.toLowerCase()) {
-                        case 'active':
+                      String displayStatus;
+
+                      switch (status) {
+                        case 'approved':
                           badgeColor = Colors.green.shade400;
+                          displayStatus = 'Active';
                           break;
                         case 'pending':
                           badgeColor = Colors.amber.shade600;
+                          displayStatus = 'Pending';
+                          break;
+                        case 'cancelled':
+                          badgeColor = Colors.red.shade400;
+                          displayStatus = 'Cancelled';
                           break;
                         case 'expired':
-                          badgeColor = Colors.red.shade400;
+                          badgeColor = Colors.grey.shade400;
+                          displayStatus = 'Expired';
                           break;
                         default:
-                          badgeColor = Colors.white70;
+                          if (kDebugMode)
+                            print('      ⚠️ Unknown status: "$status"');
+                          badgeColor = Colors.orange.shade400;
+                          displayStatus = status.isEmpty
+                              ? 'Unknown'
+                              : status.toUpperCase();
                       }
 
-                      return _statusBadge(
-                        status[0].toUpperCase() + status.substring(1),
-                        badgeColor,
-                      );
+                      if (kDebugMode)
+                        print('      Display status: $displayStatus');
+
+                      return _statusBadge(displayStatus, badgeColor);
                     },
                   ),
                 ],
@@ -774,12 +861,20 @@ class _RoomCardState extends State<RoomCard> {
                                 ),
                               ),
                             ),
-                            errorWidget: (context, url, err) => Center(
-                              child: Icon(
-                                Icons.broken_image,
-                                color: Colors.white70,
-                              ),
-                            ),
+                            errorWidget: (context, url, err) {
+                              if (kDebugMode) {
+                                print(
+                                  '❌ [Student Dashboard Card] Failed to load image: $url',
+                                );
+                                print('   Error: $err');
+                              }
+                              return Center(
+                                child: Icon(
+                                  Icons.broken_image,
+                                  color: Colors.white70,
+                                ),
+                              );
+                            },
                           );
                         },
                       ),

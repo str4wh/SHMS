@@ -11,6 +11,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
+import 'services/local_cache_service.dart';
+
 class AuthPage extends StatefulWidget {
   /// [initialMode] may be 'login' or 'signup' to pre-select the UI tab.
   const AuthPage({super.key, this.initialMode});
@@ -209,6 +211,7 @@ class _AuthPageState extends State<AuthPage> with WidgetsBindingObserver {
           await _secureStorage.write(key: _kUid, value: result.user!.uid);
         }
 
+        // Fetch role and update LocalCacheService before auth state listener fires
         await _routeByRoleFromFirestore(result.user!.uid);
       } else {
         // Sign up flow
@@ -238,6 +241,13 @@ class _AuthPageState extends State<AuthPage> with WidgetsBindingObserver {
         // Cache uid and role locally for offline access/routing
         await _secureStorage.write(key: _kUid, value: result.user!.uid);
         await _secureStorage.write(key: _kRole, value: roleStr);
+
+        // CRITICAL: Update LocalCacheService immediately to prevent race condition
+        await LocalCacheService.instance.saveUser(
+          uid: result.user!.uid,
+          email: _emailCtl.text.trim(),
+          role: roleStr,
+        );
 
         // After sign up, refresh id token. Navigation is handled by main.dart
         // which listens to auth state changes and performs role-based routing.
@@ -286,14 +296,28 @@ class _AuthPageState extends State<AuthPage> with WidgetsBindingObserver {
           .doc(uid)
           .get();
       final role = (doc.data()?['role'] as String?) ?? 'student';
+      final email = doc.data()?['email'] as String?;
+
       // Cache role locally for offline routing decisions. Navigation is handled
       // centrally in `main.dart` via auth state listeners to keep routing logic
       // testable and in one place.
       await _secureStorage.write(key: _kRole, value: role);
+
+      // CRITICAL: Update LocalCacheService to prevent race condition with main.dart auth listener
+      await LocalCacheService.instance.saveUser(
+        uid: uid,
+        email: email,
+        role: role,
+      );
     } catch (e) {
       if (kDebugMode) debugPrint('Role fetch failed: $e');
       // Fallback to student role if role fetch fails
       await _secureStorage.write(key: _kRole, value: 'student');
+      await LocalCacheService.instance.saveUser(
+        uid: uid,
+        email: null,
+        role: 'student',
+      );
     }
   }
 

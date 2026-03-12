@@ -128,8 +128,12 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
                         stream: userDocStream,
                         builder: (context, snapshot) {
                           if (snapshot.hasError) {
+                            if (kDebugMode) {
+                              print('❌ User profile error: ${snapshot.error}');
+                              print('   Stack trace: ${snapshot.stackTrace}');
+                            }
                             return _buildErrorCard(
-                              'Failed to load profile',
+                              'Failed to load profile: ${snapshot.error}',
                               () => setState(() {}),
                             );
                           }
@@ -351,8 +355,12 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
                         stream: roomsStream,
                         builder: (context, snap) {
                           if (snap.hasError) {
+                            if (kDebugMode) {
+                              print('❌ Rooms loading error: ${snap.error}');
+                              print('   Stack trace: ${snap.stackTrace}');
+                            }
                             return _buildErrorCard(
-                              'Failed to load rooms',
+                              'Failed to load rooms: ${snap.error}',
                               () => setState(() {}),
                             );
                           }

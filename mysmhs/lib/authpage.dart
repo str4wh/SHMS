@@ -79,25 +79,19 @@ class _AuthPageState extends State<AuthPage> with WidgetsBindingObserver {
   }
 
   Future<void> _initConnectivity() async {
-    final conn = await Connectivity().checkConnectivity();
-    // checkConnectivity() may now return List<ConnectivityResult>
-    // ignore: unnecessary_type_check
-    if (conn is List<ConnectivityResult>) {
-      setState(
-        () => _connectivity = conn.isNotEmpty
-            ? conn.first
-            : ConnectivityResult.none,
-      );
-      // ignore: dead_code
-    } else {
-      setState(() => _connectivity = conn as ConnectivityResult);
-    }
+    final results = await Connectivity().checkConnectivity();
+    setState(
+      () => _connectivity = results.isNotEmpty
+          ? results.first
+          : ConnectivityResult.none,
+    );
 
     _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
-      final newConn = results.isNotEmpty
-          ? results.first
-          : ConnectivityResult.none;
-      setState(() => _connectivity = newConn);
+      setState(
+        () => _connectivity = results.isNotEmpty
+            ? results.first
+            : ConnectivityResult.none,
+      );
     });
   }
 
@@ -185,8 +179,13 @@ class _AuthPageState extends State<AuthPage> with WidgetsBindingObserver {
 
     try {
       // Check connectivity for actions that need network
-      final conn = await Connectivity().checkConnectivity();
-      final online = conn != ConnectivityResult.none;
+      final results = await Connectivity().checkConnectivity();
+      final online = results.any(
+        (r) =>
+            r == ConnectivityResult.mobile ||
+            r == ConnectivityResult.wifi ||
+            r == ConnectivityResult.ethernet,
+      );
 
       if (_mode == _AuthMode.login) {
         if (!online && FirebaseAuth.instance.currentUser == null) {

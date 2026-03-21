@@ -210,7 +210,7 @@ class RoomSyncService {
       final start = DateTime.now();
       final targetPath =
           '${Directory.systemTemp.path}/fl_compressed_${DateTime.now().millisecondsSinceEpoch}_${file.uri.pathSegments.last}';
-      final result = await FlutterImageCompress.compressAndGetFile(
+      final XFile? result = await FlutterImageCompress.compressAndGetFile(
         file.path,
         targetPath,
         minWidth: maxDim,
@@ -227,8 +227,9 @@ class RoomSyncService {
         return file;
       }
 
+      final compressedFile = File(result.path);
       final originalSize = await file.length();
-      final compressedSize = await result.length();
+      final compressedSize = await compressedFile.length();
       if (kDebugMode)
         print(
           '   🔧 Compressed ${file.path} ${_formatKb(originalSize)} -> ${_formatKb(compressedSize)} in ${duration}ms (native)',
@@ -239,7 +240,7 @@ class RoomSyncService {
           print('   ⚠️ Compression did not reduce size; using original file');
         return file;
       }
-      return result;
+      return compressedFile;
     } catch (e) {
       if (kDebugMode)
         print('   ❌ Compression failed for file ${file.path}: $e');

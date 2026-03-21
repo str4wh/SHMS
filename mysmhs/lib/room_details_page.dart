@@ -466,6 +466,9 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
         try {
           if (kDebugMode) print('   🔄 Starting room switch transaction...');
 
+          final now = DateTime.now();
+          final end = now.add(const Duration(days: 30));
+
           await FirebaseFirestore.instance.runTransaction((tx) async {
             if (kDebugMode)
               print('      📖 Transaction started - Reading documents...');
@@ -568,8 +571,6 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
             final bookingRef = FirebaseFirestore.instance
                 .collection('bookings')
                 .doc();
-            final now = DateTime.now();
-            final end = DateTime.now().add(const Duration(days: 30));
 
             // Validate roomData before creating booking
             final roomNumber = roomData['roomNumber']?.toString() ?? '';
@@ -860,6 +861,9 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
         print('      New booking ID: ${bookingRef.id}');
       }
 
+      final now = DateTime.now();
+      final end = now.add(const Duration(days: 30));
+
       await FirebaseFirestore.instance.runTransaction((tx) async {
         if (kDebugMode) print('      📖 Transaction started - Reading room...');
 
@@ -899,9 +903,6 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
         }
 
         if (kDebugMode) print('      ✅ Validation passed - Starting writes...');
-
-        final now = DateTime.now();
-        final end = DateTime.now().add(const Duration(days: 30));
 
         // Create booking
         if (kDebugMode) {
@@ -956,7 +957,7 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
 
       if (kDebugMode) print('   ✅ Transaction committed successfully');
 
-      // Success
+      if (!mounted) return;
       await showDialog<void>(
         context: context,
         builder: (_) => AlertDialog(
@@ -971,6 +972,7 @@ class _RoomDetailsPageState extends State<RoomDetailsPage> {
         ),
       );
 
+      if (!mounted) return;
       Navigator.of(context).pushReplacementNamed('/student-dashboard');
     } on FirebaseException catch (e) {
       if (kDebugMode) {

@@ -360,21 +360,160 @@ class AdminDashboardPage extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
 
-                    // Placeholder for activity feed — keeps the layout from shrinking too small
-                    Container(
-                      width: double.infinity,
-                      constraints: const BoxConstraints(minHeight: 120),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.06),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        'No recent activity',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: Colors.white70,
-                        ),
-                      ),
+                    // Live maintenance requests feed
+                    StreamBuilder<QuerySnapshot>(
+                      stream: FirebaseFirestore.instance
+                          .collection('maintenance_requests')
+                          .where('status', isEqualTo: 'open')
+                          .orderBy('createdAt', descending: true)
+                          .limit(5)
+                          .snapshots(),
+                      builder: (context, snapshot) {
+                        if (snapshot.hasError) {
+                          return Container(
+                            width: double.infinity,
+                            constraints: const BoxConstraints(minHeight: 120),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.06),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              'Error loading activity',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: Colors.white70,
+                              ),
+                            ),
+                          );
+                        }
+
+                        if (snapshot.connectionState ==
+                            ConnectionState.waiting) {
+                          return Container(
+                            width: double.infinity,
+                            constraints: const BoxConstraints(minHeight: 120),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.06),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Center(
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                              ),
+                            ),
+                          );
+                        }
+
+                        final requests = snapshot.data?.docs ?? [];
+
+                        if (requests.isEmpty) {
+                          return Container(
+                            width: double.infinity,
+                            constraints: const BoxConstraints(minHeight: 120),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.06),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              'No recent activity',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: Colors.white70,
+                              ),
+                            ),
+                          );
+                        }
+
+                        return Container(
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.06),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: ListView.separated(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: requests.length,
+                            separatorBuilder: (context, index) => Divider(
+                              color: Colors.white.withOpacity(0.2),
+                              height: 1,
+                            ),
+                            itemBuilder: (context, index) {
+                              final request =
+                                  requests[index].data()
+                                      as Map<String, dynamic>;
+                              final issueType =
+                                  request['issueType'] as String? ?? 'Unknown';
+                              final roomNumber =
+                                  request['roomNumber'] as String? ?? 'N/A';
+                              final description =
+                                  request['description'] as String? ?? '';
+                              final urgency =
+                                  request['urgency'] as String? ?? 'Medium';
+
+                              // Truncate description to 60 chars
+                              final truncatedDesc = description.length > 60
+                                  ? '${description.substring(0, 60)}...'
+                                  : description;
+
+                              // Urgency badge color
+                              Color urgencyColor;
+                              switch (urgency) {
+                                case 'High':
+                                  urgencyColor = Colors.red;
+                                  break;
+                                case 'Medium':
+                                  urgencyColor = Colors.orange;
+                                  break;
+                                case 'Low':
+                                  urgencyColor = Colors.green;
+                                  break;
+                                default:
+                                  urgencyColor = Colors.grey;
+                              }
+
+                              return ListTile(
+                                leading: const Icon(
+                                  Icons.build,
+                                  color: Colors.white,
+                                ),
+                                title: Text(
+                                  '$issueType — Room $roomNumber',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  truncatedDesc,
+                                  style: TextStyle(
+                                    color: Colors.white.withOpacity(0.7),
+                                  ),
+                                ),
+                                trailing: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: urgencyColor,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    urgency,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ),

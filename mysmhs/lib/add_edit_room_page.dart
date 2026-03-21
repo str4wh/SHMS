@@ -109,6 +109,7 @@ class _AddEditRoomPageState extends State<AddEditRoomPage> {
     final XFile? picked = await _picker.pickImage(
       source: ImageSource.gallery,
       imageQuality: 80,
+      requestFullMetadata: false,
     );
     if (picked == null) return;
 

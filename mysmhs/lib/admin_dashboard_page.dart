@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'services/admin_repository.dart';
+import 'services/report_service.dart';
 
 /// Admin Dashboard — displays real-time metrics and quick actions backed by Firestore.
 /// UI aims to be production-ready: responsive, Material 3, and cleanly separated from Firestore queries.
@@ -40,6 +41,38 @@ class AdminDashboardPage extends StatelessWidget {
         iconTheme: const IconThemeData(color: Colors.white),
         actionsIconTheme: const IconThemeData(color: Colors.white),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.picture_as_pdf),
+            onPressed: () async {
+              debugPrint('===== BUTTON TAPPED =====');
+              final messenger = ScaffoldMessenger.of(context);
+              messenger.hideCurrentSnackBar();
+              messenger.showSnackBar(
+                const SnackBar(content: Text('Button tapped - starting...')),
+              );
+              try {
+                debugPrint('===== CALLING REPORT SERVICE =====');
+                await ReportService.generateAndDownloadReport();
+                debugPrint('===== REPORT SUCCESS =====');
+                if (!context.mounted) return;
+                messenger.hideCurrentSnackBar();
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Report generated!')),
+                );
+              } catch (e, st) {
+                debugPrint('===== REPORT ERROR =====');
+                debugPrint(e.toString());
+                debugPrint(st.toString());
+                debugPrint('========================');
+                if (!context.mounted) return;
+                messenger.hideCurrentSnackBar();
+                messenger.showSnackBar(
+                  SnackBar(content: Text('Error: ${e.toString()}')),
+                );
+              }
+            },
+            tooltip: 'Download Report',
+          ),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {

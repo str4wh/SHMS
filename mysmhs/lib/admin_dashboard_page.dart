@@ -861,32 +861,142 @@ class MaintenanceManagementPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const gradient = LinearGradient(
+      colors: [Color(0xFF052A6E), Color(0xFF5BC0FF)],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    );
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Maintenance Requests')),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: AdminRepository.maintenanceOpenStream(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting)
-            return const Center(child: CircularProgressIndicator());
-          final docs = snapshot.data?.docs ?? [];
-          if (docs.isEmpty)
-            return const Center(child: Text('No open maintenance requests'));
-          return ListView.builder(
-            itemCount: docs.length,
-            itemBuilder: (context, i) {
-              final d = docs[i].data();
-              return ListTile(
-                title: Text('Room: ${d['roomID'] ?? '—'}'),
-                subtitle: Text('Status: ${d['status'] ?? '—'}'),
-                trailing: ElevatedButton(
-                  onPressed: () => _assign(docs[i].id),
-                  child: const Text('Assign'),
+      backgroundColor: Colors.transparent,
+      appBar: AppBar(
+        title: const Text(
+          'Maintenance Requests',
+          style: TextStyle(color: Colors.white),
+        ),
+        backgroundColor: const Color(0xFF1E3A8A),
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: Container(
+        decoration: const BoxDecoration(gradient: gradient),
+        child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: AdminRepository.maintenanceOpenStream(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting)
+              return const Center(
+                child: CircularProgressIndicator(color: Colors.white),
+              );
+            final docs = snapshot.data?.docs ?? [];
+            if (docs.isEmpty)
+              return const Center(
+                child: Text(
+                  'No open maintenance requests',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              );
+            return ListView.builder(
+              padding: const EdgeInsets.all(12),
+              itemCount: docs.length,
+              itemBuilder: (context, i) {
+                final d = docs[i].data();
+                final urgency = d['urgency'] as String? ?? '—';
+                final urgencyColor = urgency == 'High'
+                    ? Colors.redAccent
+                    : urgency == 'Medium'
+                        ? Colors.orange
+                        : Colors.greenAccent;
+                return Card(
+                  color: Colors.white.withAlpha(25),
+                  margin: const EdgeInsets.only(bottom: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: Colors.white.withAlpha(40)),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Text(
+                                    'Room: ${d['roomNumber'] ?? '—'}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: urgencyColor.withAlpha(40),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(color: urgencyColor),
+                                    ),
+                                    child: Text(
+                                      urgency,
+                                      style: TextStyle(
+                                        color: urgencyColor,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Issue: ${d['issueType'] ?? '—'}',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                d['description'] as String? ?? '—',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.white70,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Status: ${d['status'] ?? '—'}',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.white54,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: () => _assign(docs[i].id),
+                        child: const Text('Assign'),
+                      ),
+                    ],
+                  ),
                 ),
               );
             },
           );
         },
       ),
-    );
+    ),
+  );
   }
 }

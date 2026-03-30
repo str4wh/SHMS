@@ -326,10 +326,11 @@ class _PayRentPageState extends State<PayRentPage> {
       }
 
       final checkout = res['checkoutRequestID'] as String;
-      final end = DateTime.now().add(const Duration(seconds: 60));
+      // Allow up to 3 minutes: user needs time to enter PIN + callback delivery
+      final end = DateTime.now().add(const Duration(seconds: 180));
       var completed = false;
       while (DateTime.now().isBefore(end)) {
-        await Future.delayed(const Duration(seconds: 5));
+        await Future.delayed(const Duration(seconds: 6));
         final statusResult = await mpesaService.checkPaymentStatus(checkout);
         final status = statusResult['status'] as String;
         if (status == 'completed') {
@@ -346,44 +347,21 @@ class _PayRentPageState extends State<PayRentPage> {
       if (!mounted) return;
 
       if (completed) {
-        // Save to Firestore
-        final u = FirebaseAuth.instance.currentUser;
-        await FirebaseFirestore.instance.collection('payments').add({
-          'userId': u?.uid,
-          'roomNumber': room,
-          'amount': amount,
-          'phoneNumber': phone,
-          'mpesaReceiptNumber': checkout,
-          'transactionDate': FieldValue.serverTimestamp(),
-          'status': 'completed',
-          'checkoutRequestID': checkout,
-          'completedAt': DateTime.now().toIso8601String(),
-        });
-
         if (mounted) {
           setState(() {
             _state = PaymentState.success;
             _statusMessage = 'Payment completed!';
           });
-        }
-
-        if (!mounted) return;
-
-        await showDialog<void>(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Success'),
-            content: Text(
-              'Payment of KES ${NumberFormat.decimalPattern().format(amount)} completed.',
-            ),
-            actions: [
-              ElevatedButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('OK'),
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Payment of KES ${NumberFormat.decimalPattern().format(amount)} received successfully!',
               ),
-            ],
-          ),
-        );
+              backgroundColor: Colors.green.shade700,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
       } else {
         if (mounted) {
           setState(() {

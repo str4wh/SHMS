@@ -71,8 +71,7 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
     }
     final paymentsStream = FirebaseFirestore.instance
         .collection('payments')
-        .where('studentID', isEqualTo: uid) // ✅ CORRECT FIELD
-        .orderBy('dueDate', descending: false) // ✅ Upcoming first
+        .where('userId', isEqualTo: uid)
         .snapshots();
     final maintenanceStream = FirebaseFirestore.instance
         .collection('maintenance_requests')
@@ -183,127 +182,80 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
                             crossAxisSpacing: 12,
                             mainAxisSpacing: 12,
                             children: [
+                              // Rent Status — shows booking price; "Paid" if paid this month
                               StreamBuilder<
                                 QuerySnapshot<Map<String, dynamic>>
                               >(
-                                stream: paymentsStream,
-                                builder: (context, snap) {
-                                  if (snap.hasError) {
-                                    return _MetricCard(
-                                      title: 'Rent Status',
-                                      value: 'Error',
-                                      semanticHint: 'Rent status',
-                                    );
+                                stream: bookingsStream,
+                                builder: (context, bookSnap) {
+                                  double rentAmount = 0.0;
+                                  if (bookSnap.hasData) {
+                                    final docs = bookSnap.data!.docs;
+                                    if (docs.isNotEmpty) {
+                                      rentAmount =
+                                          (docs.first.data()['price'] as num?)
+                                              ?.toDouble() ??
+                                          0.0;
+                                    }
                                   }
-                                  if (snap.connectionState ==
-                                      ConnectionState.waiting) {
-                                    return _MetricCard(
-                                      title: 'Rent Status',
-                                      value: 'Loading',
-                                      semanticHint: 'Rent status',
-                                    );
-                                  }
-
-                                  final docs = snap.data?.docs ?? [];
-                                  String status = 'No records';
-                                  double amount = 0.0;
-                                  DateTime? nextDue;
-
-                                  if (docs.isNotEmpty) {
-                                    // pick the nearest dueDate in future or the latest
-                                    docs.sort((a, b) {
-                                      final aDate =
-                                          (a.data()['dueDate'] as Timestamp?)
-                                              ?.toDate() ??
-                                          DateTime.fromMillisecondsSinceEpoch(
-                                            0,
-                                          );
-                                      final bDate =
-                                          (b.data()['dueDate'] as Timestamp?)
-                                              ?.toDate() ??
-                                          DateTime.fromMillisecondsSinceEpoch(
-                                            0,
-                                          );
-                                      return aDate.compareTo(bDate);
-                                    });
-                                    final next = docs.firstWhere((d) {
-                                      final due =
-                                          (d.data()['dueDate'] as Timestamp?)
-                                              ?.toDate();
-                                      return due == null ||
-                                          due.isAfter(DateTime.now());
-                                    }, orElse: () => docs.last);
-
-                                    status =
-                                        (next.data()['status'] as String?) ??
-                                        'Due';
-                                    amount =
-                                        (next.data()['amount'] as num?)
-                                            ?.toDouble() ??
-                                        0.0;
-                                    nextDue =
-                                        (next.data()['dueDate'] as Timestamp?)
-                                            ?.toDate();
-                                  }
-
-                                  return _MetricCard(
-                                    title: 'Rent Status',
-                                    value: status == 'paid'
-                                        ? 'Paid'
-                                        : 'Due KES ${_formatCurrency(amount)}',
-                                    semanticHint:
-                                        'Shows whether rent is paid or due',
+                                  return StreamBuilder<
+                                    QuerySnapshot<Map<String, dynamic>>
+                                  >(
+                                    stream: paymentsStream,
+                                    builder: (context, paySnap) {
+                                      if (paySnap.connectionState ==
+                                              ConnectionState.waiting &&
+                                          bookSnap.connectionState ==
+                                              ConnectionState.waiting) {
+                                        return _MetricCard(
+                                          title: 'Rent Status',
+                                          value: 'Loading',
+                                          semanticHint: 'Rent status',
+                                        );
+                                      }
+                                      final payments =
+                                          paySnap.data?.docs ?? [];
+                                      final now = DateTime.now();
+                                      final paidThisMonth = payments.any((p) {
+                                        final d = p.data();
+                                        if (d['status'] != 'completed') {
+                                          return false;
+                                        }
+                                        final ts =
+                                            (d['completedAt'] as Timestamp?) ??
+                                            (d['createdAt'] as Timestamp?);
+                                        final date = ts?.toDate();
+                                        return date != null &&
+                                            date.year == now.year &&
+                                            date.month == now.month;
+                                      });
+                                      return _MetricCard(
+                                        title: 'Rent Status',
+                                        value: paidThisMonth
+                                            ? 'Paid'
+                                            : rentAmount > 0
+                                            ? 'Due KES ${_formatCurrency(rentAmount)}'
+                                            : 'No booking',
+                                        semanticHint:
+                                            'Shows whether rent is paid or due',
+                                      );
+                                    },
                                   );
                                 },
                               ),
-                              StreamBuilder<
-                                QuerySnapshot<Map<String, dynamic>>
-                              >(
-                                stream: paymentsStream,
-                                builder: (context, snap) {
-                                  if (snap.hasError) {
-                                    return _MetricCard(
-                                      title: 'Next Payment',
-                                      value: 'Error',
-                                      semanticHint: 'Next payment date',
-                                    );
-                                  }
-                                  if (snap.connectionState ==
-                                      ConnectionState.waiting) {
-                                    return _MetricCard(
-                                      title: 'Next Payment',
-                                      value: 'Loading',
-                                      semanticHint: 'Next payment date',
-                                    );
-                                  }
-
-                                  final docs = snap.data?.docs ?? [];
-                                  DateTime? nextDue;
-                                  if (docs.isNotEmpty) {
-                                    final dates = docs
-                                        .map(
-                                          (d) =>
-                                              (d.data()['dueDate']
-                                                      as Timestamp?)
-                                                  ?.toDate(),
-                                        )
-                                        .whereType<DateTime>()
-                                        .toList();
-                                    dates.sort();
-                                    nextDue = dates.isNotEmpty
-                                        ? dates.firstWhere(
-                                            (d) => d.isAfter(DateTime.now()),
-                                            orElse: () => dates.last,
-                                          )
-                                        : null;
-                                  }
-                                  final dateStr = nextDue == null
-                                      ? 'No upcoming'
-                                      : _formatDate(nextDue);
+                              // Next Payment — always end of current month
+                              Builder(
+                                builder: (context) {
+                                  final now = DateTime.now();
+                                  final endOfMonth = DateTime(
+                                    now.year,
+                                    now.month + 1,
+                                    0,
+                                  );
                                   return _MetricCard(
                                     title: 'Next Payment',
-                                    value: dateStr,
-                                    semanticHint: 'Next payment date',
+                                    value: _formatDate(endOfMonth),
+                                    semanticHint: 'Next payment due date',
                                   );
                                 },
                               ),
